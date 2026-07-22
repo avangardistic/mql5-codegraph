@@ -1,0 +1,161 @@
+"""Composable command-line interface for MQL5 CodeGraph."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+from typing import Any, Sequence
+
+from .exporters.graphml import export_graphml
+from .graph import CodeGraph
+from .indexer import analyze_repository
+
+
+def _emit(value: Any, as_json: bool, human: str | None = None) -> None:
+    if as_json:
+        print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+    elif human is not None:
+        print(human)
+    else:
+        print(value)
+
+
+def _matches(graph: CodeGraph, symbol: str) -> list[str]:
+    exact = [node.id for node in graph.nodes.values()
+             if node.name.casefold() == symbol.casefold()
+             or node.qualified_name.casefold() == symbol.casefold()]
+    return sorted(exact or [node.id for node in graph.find_nodes(symbol)])
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="mql5-codegraph", description="MQL5 static code graph indexer")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.2.0")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    analyze = subcommands.add_parser("analyze", help="Analyze an MQL5 source tree")
+    analyze.add_argument("root")
+    analyze.add_argument("--output", "-o", required=True)
+    analyze.add_argument("--include-root", action="append", default=[])
+    analyze.add_argument("--exclude", action="append", default=[])
+    analyze.add_argument("--json", action="store_true")
+
+    status = subcommands.add_parser("status", help="Show saved graph metadata")
+    status.add_argument("graph")
+    status.add_argument("--json", action="store_true")
+
+    query = subcommands.add_parser("query", help="Find graph nodes")
+    query.add_argument("graph")
+    query.add_argument("text")
+    query.add_argument("--kind")
+    query.add_argument("--json", action="store_true")
+
+    context = subcommands.add_parser("context", help="Inspect a symbol neighborhood")
+    context.add_argument("graph")
+    context.add_argument("symbol")
+    context.add_argument("--depth", type=int, default=1)
+    context.add_argument("--json", action="store_true")
+
+    impact = subcommands.add_parser("impact", help="Traverse upstream graph impact")
+    impact.add_argument("graph")
+    impact.add_argument("symbol")
+    impact.add_argument("--depth", type=int, default=3)
+    impact.add_argument("--json", action="store_true")
+
+    export = subcommands.add_parser("export", help="Export a saved graph")
+    export.add_argument("graph")
+    export.add_argument("--format", choices=["graphml"], required=True)
+    export.add_argument("--output", "-o", required=True)
+    export.add_argument("--json", action="store_true")
+
+    serve = subcommands.add_parser("serve", help="Start the local interactive dashboard")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--root", help="Repository to analyze when the dashboard starts")
+    serve.add_argument("--graph", help="Load an existing canonical graph JSON")
+    serve.add_argument("--include-root", action="append", default=[])
+    serve.add_argument("--no-browser", action="store_true")
+    return parser
+
+
+def run(arguments: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(arguments)
+    if args.command == "serve":
+        from .web import serve_dashboard
+
+        serve_dashboard(
+            host=args.host, port=args.port, root=args.root, graph_path=args.graph,
+            include_roots=args.include_root, open_browser=not args.no_browser,
+        )
+        return 0
+    if args.command == "analyze":
+        graph = analyze_repository(args.root, args.include_root, args.exclude)
+        graph.save(args.output)
+        summary = {
+            "output": str(Path(args.output).resolve()),
+            "files": graph.metadata["file_count"],
+            "nodes": len(graph.nodes), "edges": len(graph.edges),
+            "diagnostics": len(graph.diagnostics),
+            "source_fingerprint": graph.metadata["source_fingerprint"],
+        }
+        _emit(summary, args.json,
+              f"Indexed {summary['files']} files: {summary['nodes']} nodes, "
+              f"{summary['edges']} edges, {summary['diagnostics']} diagnostics -> {args.output}")
+        return 0
+
+    graph = CodeGraph.load(args.graph)
+    if args.command == "status":
+        severities: dict[str, int] = {}
+        for diagnostic in graph.diagnostics:
+            severities[diagnostic.severity] = severities.get(diagnostic.severity, 0) + 1
+        result = {
+            "schema_version": graph.schema_version,
+            "files": graph.metadata.get("file_count", 0),
+            "nodes": len(graph.nodes), "edges": len(graph.edges),
+            "diagnostics": severities,
+            "source_fingerprint": graph.metadata.get("source_fingerprint"),
+        }
+        _emit(result, args.json,
+              f"Schema {result['schema_version']}: {result['files']} files, "
+              f"{result['nodes']} nodes, {result['edges']} edges")
+        return 0
+
+    if args.command == "query":
+        nodes = [node.to_dict() for node in graph.find_nodes(args.text, args.kind)]
+        _emit(nodes, args.json, "\n".join(f"{item['kind']}: {item['qualified_name']}" for item in nodes)
+              or "No matches")
+        return 0
+
+    if args.command in {"context", "impact"}:
+        seeds = _matches(graph, args.symbol)
+        if not seeds:
+            print(f"No symbol matches {args.symbol!r}", file=sys.stderr)
+            return 2
+        if args.command == "context":
+            value = graph.neighborhood(seeds, max(0, args.depth))
+            human = f"{len(value['nodes'])} nodes, {len(value['edges'])} edges"
+        else:
+            value = graph.upstream_impact(seeds, max(0, args.depth))
+            human = "\n".join(
+                f"d={item['distance']} {item['node']['kind']}: {item['node']['qualified_name']}"
+                for item in value
+            ) or "No upstream impact found"
+        _emit(value, args.json, human)
+        return 0
+
+    if args.command == "export":
+        export_graphml(graph, args.output)
+        value = {"format": args.format, "output": str(Path(args.output).resolve()),
+                 "nodes": len(graph.nodes), "edges": len(graph.edges)}
+        _emit(value, args.json, f"Exported {args.format} -> {args.output}")
+        return 0
+    return 2
+
+
+def main() -> int:
+    try:
+        return run()
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mql5-codegraph"
+version = "0.2.0"
+description = "Evidence-backed static code graph indexer for MQL5 repositories"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MQL5 CodeGraph Contributors" }]
+keywords = ["mql5", "metatrader", "static-analysis", "codegraph"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.scripts]
+mql5-codegraph = "mql5_codegraph.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mql5_codegraph = ["web_static/**"]
