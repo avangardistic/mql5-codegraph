@@ -1,0 +1,275 @@
+{
+  "fixture": "basic_ea",
+  "encoding": "utf-8",
+  "serialization": "compact JSON with sorted keys",
+  "cases": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "f7a517bfbf7c6128e27ef57048a34d242cf0a28ecafcfd33431cab2d58c3c807",
+      "body_json": {
+        "active_job_id": null,
+        "graph_version": 1,
+        "ok": true,
+        "ready": true,
+        "service": "mql5-codegraph",
+        "version": "0.2.0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/query?q=CalculateLots",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "9af8d74290675ef8c4c7d6651fa908c94f36ff81bb2d804099ebad79443919c3",
+      "body_json": {
+        "query": "CalculateLots",
+        "results": [
+          {
+            "attributes": {
+              "parameter_count": 1,
+              "signature": "CRiskManager::CalculateLots(const double risk)"
+            },
+            "id": "symbol:bfa036a6cbac7508c6be",
+            "kind": "method",
+            "location": {
+              "column": 11,
+              "file": "Risk.mqh",
+              "line": 6
+            },
+            "name": "CalculateLots",
+            "qualified_name": "CRiskManager::CalculateLots"
+          }
+        ],
+        "version": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/context?symbol=CalculateLots&depth=1",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "759a3e681a1f62bf8d5171c42657ad3e2c0470b2d6dfed72df92aa5a5a2b5b27",
+      "body_json": {
+        "depth": 1,
+        "edges": [
+          {
+            "attributes": {},
+            "confidence": 1.0,
+            "id": "edge:afaacae0dddece6ec459",
+            "location": {"column": 11, "file": "Risk.mqh", "line": 6},
+            "origin": "extracted",
+            "relationship": "defines",
+            "source": "file:ae7c46ed6eb3766b8c2d",
+            "target": "symbol:bfa036a6cbac7508c6be"
+          },
+          {
+            "attributes": {
+              "argument_count": 1,
+              "qualifier": "risk_manager"
+            },
+            "confidence": 1.0,
+            "id": "edge:b8d2bf4ccce3f50ae4bf",
+            "location": {"column": 37, "file": "BasicEA.mq5", "line": 14},
+            "origin": "resolved",
+            "relationship": "calls",
+            "source": "symbol:584ea29f9a049db63baa",
+            "target": "symbol:bfa036a6cbac7508c6be"
+          },
+          {
+            "attributes": {"argument_count": 2, "qualifier": null},
+            "confidence": 0.5,
+            "id": "edge:c35a60de35047754bf18",
+            "location": {"column": 14, "file": "Risk.mqh", "line": 8},
+            "origin": "extracted",
+            "relationship": "calls",
+            "source": "symbol:bfa036a6cbac7508c6be",
+            "target": "external:93629e817df5206b2c08"
+          }
+        ],
+        "nodes": [
+          {
+            "attributes": {"external": true},
+            "id": "external:93629e817df5206b2c08",
+            "kind": "external_function",
+            "name": "NormalizeDouble",
+            "qualified_name": "MQL5::NormalizeDouble"
+          },
+          {
+            "attributes": {"extension": ".mqh"},
+            "id": "file:ae7c46ed6eb3766b8c2d",
+            "kind": "file",
+            "name": "Risk.mqh",
+            "qualified_name": "Risk.mqh"
+          },
+          {
+            "attributes": {
+              "parameter_count": 0,
+              "signature": "OnTick()"
+            },
+            "id": "symbol:584ea29f9a049db63baa",
+            "kind": "event_handler",
+            "location": {"column": 6, "file": "BasicEA.mq5", "line": 12},
+            "name": "OnTick",
+            "qualified_name": "OnTick"
+          },
+          {
+            "attributes": {
+              "parameter_count": 1,
+              "signature": "CRiskManager::CalculateLots(const double risk)"
+            },
+            "id": "symbol:bfa036a6cbac7508c6be",
+            "kind": "method",
+            "location": {"column": 11, "file": "Risk.mqh", "line": 6},
+            "name": "CalculateLots",
+            "qualified_name": "CRiskManager::CalculateLots"
+          }
+        ],
+        "symbol": "CalculateLots",
+        "version": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/impact?symbol=CalculateLots&depth=3",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "a5c845a9f471514710bea43b88a2c6e950da4fd48a6a1c9a16e6876a46c25cb4",
+      "body_json": {
+        "depth": 3,
+        "results": [
+          {
+            "distance": 1,
+            "edge_path": ["edge:afaacae0dddece6ec459"],
+            "node": {
+              "attributes": {"extension": ".mqh"},
+              "id": "file:ae7c46ed6eb3766b8c2d",
+              "kind": "file",
+              "name": "Risk.mqh",
+              "qualified_name": "Risk.mqh"
+            }
+          },
+          {
+            "distance": 1,
+            "edge_path": ["edge:b8d2bf4ccce3f50ae4bf"],
+            "node": {
+              "attributes": {
+                "parameter_count": 0,
+                "signature": "OnTick()"
+              },
+              "id": "symbol:584ea29f9a049db63baa",
+              "kind": "event_handler",
+              "location": {"column": 6, "file": "BasicEA.mq5", "line": 12},
+              "name": "OnTick",
+              "qualified_name": "OnTick"
+            }
+          },
+          {
+            "distance": 2,
+            "edge_path": [
+              "edge:afaacae0dddece6ec459",
+              "edge:4fb103589a1ad64c26c5"
+            ],
+            "node": {
+              "attributes": {"extension": ".mq5"},
+              "id": "file:7cf61f9bcf208fc2cf4a",
+              "kind": "file",
+              "name": "BasicEA.mq5",
+              "qualified_name": "BasicEA.mq5"
+            }
+          },
+          {
+            "distance": 2,
+            "edge_path": [
+              "edge:b8d2bf4ccce3f50ae4bf",
+              "edge:1f6c07a77ec7857c972e"
+            ],
+            "node": {
+              "attributes": {"platform": "MetaTrader 5"},
+              "id": "runtime:d6debd55ea376705fb5c",
+              "kind": "runtime",
+              "name": "MetaTrader 5 Terminal",
+              "qualified_name": "runtime::MetaTrader5Terminal"
+            }
+          }
+        ],
+        "symbol": "CalculateLots",
+        "version": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/diagnostics?severity=warning",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "b38148dfdbf2c4c8eb56de1828bdb4c2060aa652211a34166fa6417e3cd989eb",
+      "body_json": {
+        "by_code": {"PARSE001": 1, "RESOLVE003": 4},
+        "by_severity": {"info": 4, "warning": 1},
+        "items": [
+          {
+            "code": "PARSE001",
+            "location": {"column": 3, "file": "Malformed.mqh", "line": 2},
+            "message": "Unmatched {",
+            "severity": "warning"
+          }
+        ],
+        "matched": 1,
+        "total": 5,
+        "truncated": false,
+        "version": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/query",
+      "status": 400,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "48e2fe5b91dbf92413066150ea1b519d42e57f6daca2ea9af972778dbe4334e4",
+      "body_json": {
+        "error": {"code": "missing_query", "message": "q is required"}
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/context?symbol=DoesNotExist",
+      "status": 404,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "da6c9bf7e21aaba03372552f60f27bf8650eeff4c2dc1bfe1e84ce3d4d7fd232",
+      "body_json": {
+        "error": {
+          "code": "symbol_not_found",
+          "message": "No symbol matches 'DoesNotExist'"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/context?symbol=OnTick&depth=99",
+      "status": 400,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "035b70457296d60cb0349fc0f4825dd19027df3531acd795ecc30e4572ea34a4",
+      "body_json": {
+        "error": {
+          "code": "invalid_parameter",
+          "message": "depth must be between 0 and 5"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/not-real",
+      "status": 404,
+      "content_type": "application/json; charset=utf-8",
+      "body_sha256": "8bb6fd7552ed791e67c8157c779c559a38a51ecf3d0169e3e9bffb5b7caf39d0",
+      "body_json": {
+        "error": {
+          "code": "endpoint_not_found",
+          "message": "API endpoint was not found"
+        }
+      }
+    }
+  ]
+}

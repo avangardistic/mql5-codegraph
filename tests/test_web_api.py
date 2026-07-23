@@ -1,14 +1,20 @@
 from http.client import HTTPConnection
+from hashlib import sha256
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 from time import monotonic, sleep
 from unittest import TestCase
+from unittest.mock import patch
 
+from mql5_codegraph.graph import SourceLocation
+from mql5_codegraph.indexer import analyze_repository
+from mql5_codegraph.intelligence import IntelligenceError
 from mql5_codegraph.web.api import ApiError, DashboardApi
 from mql5_codegraph.web.server import create_server
 from mql5_codegraph.web.state import DashboardState
+from tests.intelligence.helpers import build_graph, make_edge, make_node
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "basic_ea"
@@ -68,6 +74,99 @@ class DashboardApiTests(TestCase):
             self.api.context({"symbol": ["OnTick"], "depth": ["99"]})
         self.assertEqual("invalid_parameter", depth.exception.code)
 
+    def test_normalized_path_projects_defaults_and_evidence(self) -> None:
+        source = make_node("OnTick", node_id="node:on-tick")
+        target = make_node("CalculateLots", node_id="node:calculate-lots")
+        edge = make_edge(
+            source,
+            target,
+            edge_id="edge:on-tick-calculate-lots",
+            origin="runtime",
+            confidence=0.8,
+            location=SourceLocation("Expert.mq5", 12, 5),
+        )
+        graph = build_graph([target, source], [edge])
+        state = DashboardState()
+        state.load_graph(graph, Path.cwd())
+
+        payload = DashboardApi(state).intelligence(
+            "path",
+            {
+                "contract_version": "1.0.0",
+                "targets": [
+                    {"value": source.id, "kind": None},
+                    {"value": target.id, "kind": None},
+                ],
+            },
+        )
+
+        self.assertEqual("path", payload["operation"])
+        self.assertEqual("outgoing", payload["request"]["direction"])
+        self.assertEqual(
+            {
+                "context_units": 100,
+                "max_depth": 5,
+                "max_expansions": 10_000,
+                "max_items": 30,
+                "max_paths": 3,
+            },
+            payload["limits_applied"],
+        )
+        self.assertEqual(
+            [source.id, target.id],
+            payload["paths"][0]["node_ids"],
+        )
+        hop = payload["paths"][0]["hops"][0]
+        self.assertEqual("forward", hop["direction"])
+        self.assertEqual("runtime", hop["evidence"]["origin"])
+        self.assertEqual(0.8, hop["evidence"]["confidence"])
+        self.assertEqual(
+            {"file": "Expert.mq5", "line": 12, "column": 5},
+            hop["evidence"]["location"],
+        )
+
+    def test_normalized_path_preserves_stable_validation_errors(self) -> None:
+        graph = build_graph([make_node("Source"), make_node("Target")])
+        state = DashboardState()
+        state.load_graph(graph, Path.cwd())
+        api = DashboardApi(state)
+        base = {
+            "contract_version": "1.0.0",
+            "targets": [
+                {"value": "Source", "kind": None},
+                {"value": "Target", "kind": None},
+            ],
+        }
+        cases = (
+            (
+                {**base, "contract_version": "2.0.0"},
+                "unsupported_contract_version",
+                "contract_version",
+            ),
+            (
+                {**base, "bounds": {"max_paths": 0}},
+                "invalid_parameter",
+                "bounds.max_paths",
+            ),
+            (
+                {**base, "bounds": []},
+                "invalid_parameter",
+                "bounds",
+            ),
+            (
+                {**base, "operation": "query"},
+                "invalid_request",
+                None,
+            ),
+        )
+
+        for request, code, field in cases:
+            with self.subTest(code=code, field=field):
+                with self.assertRaises(IntelligenceError) as raised:
+                    api.intelligence("path", request)
+                self.assertEqual(code, raised.exception.code)
+                self.assertEqual(field, raised.exception.field)
+
 
 class DashboardHttpTests(TestCase):
     def test_http_health_static_and_malformed_json(self) -> None:
@@ -103,3 +202,145 @@ class DashboardHttpTests(TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+    def test_normalized_path_route_status_mapping_and_content_type(self) -> None:
+        state = ready_state()
+        server = create_server(state, port=0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        api = server.RequestHandlerClass.keywords["api"]
+        base = {
+            "contract_version": "1.0.0",
+            "targets": [
+                {"value": "OnTick", "kind": None},
+                {"value": "CalculateLots", "kind": None},
+            ],
+        }
+
+        def post(payload: dict[str, object]) -> tuple[int, str | None, dict[str, object]]:
+            body = json.dumps(payload).encode("utf-8")
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            connection.request(
+                "POST",
+                "/api/v1/intelligence/path",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            result = (
+                response.status,
+                response.getheader("Content-Type"),
+                json.loads(response.read()),
+            )
+            connection.close()
+            return result
+
+        try:
+            status, content_type, payload = post(base)
+            self.assertEqual(200, status)
+            self.assertEqual("application/json; charset=utf-8", content_type)
+            self.assertEqual("path", payload["operation"])
+            self.assertEqual("complete", payload["completion"]["reason"])
+            self.assertEqual(1, len(payload["paths"]))
+
+            request_errors = (
+                ({**base, "operation": "query"}, 400, "invalid_request"),
+                ({**base, "bounds": {"max_paths": 0}}, 400, "invalid_parameter"),
+                ({**base, "targets": base["targets"][:1]}, 400, "missing_target"),
+                (
+                    {**base, "contract_version": "2.0.0"},
+                    409,
+                    "unsupported_contract_version",
+                ),
+                (
+                    {**base, "expected_source_fingerprint": "different"},
+                    409,
+                    "graph_identity_mismatch",
+                ),
+            )
+            for request, expected_status, expected_code in request_errors:
+                with self.subTest(code=expected_code):
+                    status, content_type, payload = post(request)
+                    self.assertEqual(expected_status, status)
+                    self.assertEqual("application/json; charset=utf-8", content_type)
+                    self.assertEqual(expected_code, payload["error"]["code"])
+
+            projected_errors = (
+                (IntelligenceError.unsupported_operation("path"), 409),
+                (IntelligenceError.unsupported_graph_schema("2.0.0"), 409),
+                (
+                    IntelligenceError(
+                        "state",
+                        "graph_not_ready",
+                        "Graph snapshot is not ready",
+                        retryable=True,
+                    ),
+                    409,
+                ),
+                (
+                    IntelligenceError(
+                        "integrity",
+                        "graph_integrity_error",
+                        "Graph integrity check failed",
+                    ),
+                    422,
+                ),
+                (
+                    IntelligenceError(
+                        "internal",
+                        "unexpected_intelligence_error",
+                        "Unexpected intelligence failure",
+                    ),
+                    500,
+                ),
+            )
+            for error, expected_status in projected_errors:
+                with self.subTest(code=error.code):
+                    with patch.object(api, "intelligence", side_effect=error):
+                        status, content_type, payload = post(base)
+                    self.assertEqual(expected_status, status)
+                    self.assertEqual("application/json; charset=utf-8", content_type)
+                    self.assertEqual(error.code, payload["error"]["code"])
+
+            with patch.object(api, "intelligence", side_effect=RuntimeError("boom")):
+                status, content_type, payload = post(base)
+            self.assertEqual(500, status)
+            self.assertEqual("application/json; charset=utf-8", content_type)
+            self.assertEqual("internal_error", payload["error"]["code"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_legacy_http_contract_golden_bytes(self) -> None:
+        contract = json.loads(
+            (Path(__file__).parent / "fixtures" / "contracts" / "legacy_http.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        state = DashboardState()
+        state.load_graph(analyze_repository(FIXTURE), FIXTURE)
+        server = create_server(state, port=0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            for case in contract["cases"]:
+                with self.subTest(path=case["path"]):
+                    connection.request(case["method"], case["path"])
+                    response = connection.getresponse()
+                    body = response.read()
+                    self.assertEqual(case["status"], response.status)
+                    self.assertEqual(case["content_type"], response.getheader("Content-Type"))
+                    self.assertEqual(
+                        case["body_sha256"], sha256(body).hexdigest()
+                    )
+                    self.assertEqual(case["body_json"], json.loads(body))
+            connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)

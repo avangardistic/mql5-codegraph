@@ -6,7 +6,25 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from ..intelligence import IntelligenceError
 from .state import DashboardState
+
+
+_PATH_BOUNDS_DEFAULTS = {
+    "max_depth": 5,
+    "max_items": 30,
+    "max_paths": 3,
+    "max_expansions": 10_000,
+    "context_units": 100,
+}
+
+_CONTEXT_PACKAGE_BOUNDS_DEFAULTS = {
+    "max_depth": 2,
+    "max_items": 30,
+    "max_paths": 3,
+    "max_expansions": 10_000,
+    "context_units": 100,
+}
 
 
 class ApiError(Exception):
@@ -33,6 +51,41 @@ def _bounded_int(value: str | None, default: int, minimum: int, maximum: int, na
     if not minimum <= parsed <= maximum:
         raise ApiError(400, "invalid_parameter", f"{name} must be between {minimum} and {maximum}")
     return parsed
+
+
+def _normalize_path_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    body = dict(payload)
+    body.setdefault("direction", "outgoing")
+    if "bounds" not in body:
+        supplied_bounds: Mapping[str, Any] = {}
+    elif not isinstance(body["bounds"], Mapping):
+        raise IntelligenceError.invalid_parameter(
+            "bounds", "must be an object"
+        )
+    else:
+        supplied_bounds = body["bounds"]
+    body["bounds"] = {**_PATH_BOUNDS_DEFAULTS, **dict(supplied_bounds)}
+    return body
+
+
+def _normalize_context_package_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    body = dict(payload)
+    body.setdefault("direction", "both")
+    if "bounds" not in body:
+        supplied_bounds: Mapping[str, Any] = {}
+    elif not isinstance(body["bounds"], Mapping):
+        raise IntelligenceError.invalid_parameter(
+            "bounds", "must be an object"
+        )
+    else:
+        supplied_bounds = body["bounds"]
+    body["bounds"] = {
+        **_CONTEXT_PACKAGE_BOUNDS_DEFAULTS,
+        **dict(supplied_bounds),
+    }
+    return body
 
 
 class DashboardApi:
@@ -74,10 +127,20 @@ class DashboardApi:
         return {"job": job.to_dict()}
 
     def _graph(self):
-        graph, root, version = self.state.snapshot()
+        graph, _, root, version = self.state.intelligence_snapshot()
         if graph is None:
             raise ApiError(409, "graph_not_ready", "Analyze a repository before using this endpoint")
         return graph, root, version
+
+    def _graph_and_kernel(self):
+        graph, kernel, root, version = self.state.intelligence_snapshot()
+        if graph is None or kernel is None:
+            raise ApiError(
+                409,
+                "graph_not_ready",
+                "Analyze a repository before using this endpoint",
+            )
+        return graph, kernel, root, version
 
     def graph(self, params: Mapping[str, Sequence[str]]) -> dict[str, object]:
         graph, _, version = self._graph()
@@ -110,34 +173,34 @@ class DashboardApi:
         }
 
     def query(self, params: Mapping[str, Sequence[str]]) -> dict[str, object]:
-        graph, _, version = self._graph()
+        _, kernel, _, version = self._graph_and_kernel()
         query = (_single(params, "q", "") or "").strip()
         if not query:
             raise ApiError(400, "missing_query", "q is required")
         kind = _single(params, "kind")
         limit = _bounded_int(_single(params, "limit"), 30, 1, 100, "limit")
-        matches = graph.find_nodes(query, kind)[:limit]
+        matches = kernel.legacy_find_nodes(query, kind)[:limit]
         return {"version": version, "query": query, "results": [node.to_dict() for node in matches]}
 
     def context(self, params: Mapping[str, Sequence[str]]) -> dict[str, object]:
-        graph, _, version = self._graph()
+        graph, kernel, _, version = self._graph_and_kernel()
         symbol = (_single(params, "symbol", "") or "").strip()
         if not symbol:
             raise ApiError(400, "missing_symbol", "symbol is required")
         depth = _bounded_int(_single(params, "depth"), 1, 0, 5, "depth")
         seeds = self._resolve_symbols(graph, symbol)
         return {"version": version, "symbol": symbol, "depth": depth,
-                **graph.neighborhood(seeds, depth)}
+                **kernel.legacy_neighborhood(seeds, depth)}
 
     def impact(self, params: Mapping[str, Sequence[str]]) -> dict[str, object]:
-        graph, _, version = self._graph()
+        graph, kernel, _, version = self._graph_and_kernel()
         symbol = (_single(params, "symbol", "") or "").strip()
         if not symbol:
             raise ApiError(400, "missing_symbol", "symbol is required")
         depth = _bounded_int(_single(params, "depth"), 3, 0, 5, "depth")
         seeds = self._resolve_symbols(graph, symbol)
         return {"version": version, "symbol": symbol, "depth": depth,
-                "results": graph.upstream_impact(seeds, depth)}
+                "results": kernel.legacy_upstream_impact(seeds, depth)}
 
     @staticmethod
     def _resolve_symbols(graph, symbol: str) -> list[str]:
@@ -150,14 +213,11 @@ class DashboardApi:
         return sorted(matches)
 
     def diagnostics(self, params: Mapping[str, Sequence[str]]) -> dict[str, object]:
-        graph, _, version = self._graph()
+        graph, kernel, _, version = self._graph_and_kernel()
         severity = _single(params, "severity")
         code = _single(params, "code")
         limit = _bounded_int(_single(params, "limit"), 250, 1, 1000, "limit")
-        all_items = sorted(graph.diagnostics, key=lambda item: (
-            item.severity, item.code, item.location.file if item.location else "",
-            item.location.line if item.location else 0, item.message,
-        ))
+        all_items = list(kernel.index.diagnostics)
         filtered = [item for item in all_items
                     if (not severity or item.severity == severity) and (not code or item.code == code)]
         return {
@@ -167,6 +227,32 @@ class DashboardApi:
             "by_severity": dict(sorted(Counter(item.severity for item in all_items).items())),
             "by_code": dict(sorted(Counter(item.code for item in all_items).items())),
         }
+
+    def intelligence(self, operation: str, payload: Any) -> dict[str, object]:
+        if not isinstance(payload, dict):
+            raise IntelligenceError.invalid_request(
+                "Intelligence request must be an object"
+            )
+        graph, kernel, _, _ = self.state.intelligence_snapshot()
+        if graph is None or kernel is None:
+            raise IntelligenceError(
+                "state",
+                "graph_not_ready",
+                "Analyze a repository before using this endpoint",
+                retryable=True,
+            )
+        body = dict(payload)
+        supplied_operation = body.get("operation")
+        if supplied_operation is not None and supplied_operation != operation:
+            raise IntelligenceError.invalid_request(
+                "Request operation does not match the route"
+            )
+        if operation == "path":
+            body = _normalize_path_payload(body)
+        elif operation == "context_package":
+            body = _normalize_context_package_payload(body)
+        body["operation"] = operation
+        return kernel.execute(body).to_dict()
 
     def source(self, params: Mapping[str, Sequence[str]]) -> dict[str, object]:
         _, root, version = self._graph()

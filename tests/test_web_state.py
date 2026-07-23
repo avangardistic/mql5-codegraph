@@ -4,6 +4,7 @@ from time import monotonic, sleep
 from unittest import TestCase
 
 from mql5_codegraph.graph import CodeGraph
+from mql5_codegraph.intelligence import IntelligenceKernel
 from mql5_codegraph.web.state import DashboardState
 
 
@@ -65,3 +66,41 @@ class DashboardStateTests(TestCase):
         self.assertIs(original, current)
         self.assertEqual(version, current_version)
         self.assertEqual("synthetic failure", state.status()["last_error"])
+
+    def test_graph_and_kernel_snapshots_are_published_as_one_revision(self) -> None:
+        first_graph = CodeGraph({"source_fingerprint": "first"})
+        second_graph = CodeGraph({"source_fingerprint": "second"})
+        state = DashboardState()
+
+        state.load_graph(first_graph, FIXTURE)
+        graph, kernel, root, revision = state.intelligence_snapshot()
+        self.assertIs(first_graph, graph)
+        self.assertIsInstance(kernel, IntelligenceKernel)
+        self.assertEqual("first", kernel.graph_identity.source_fingerprint)
+        self.assertEqual(revision, kernel.graph_identity.snapshot_revision)
+        self.assertEqual(FIXTURE.resolve(), root)
+
+        state.load_graph(second_graph, FIXTURE)
+        graph, kernel, _, revision = state.intelligence_snapshot()
+        self.assertIs(second_graph, graph)
+        self.assertEqual("second", kernel.graph_identity.source_fingerprint)
+        self.assertEqual(revision, kernel.graph_identity.snapshot_revision)
+
+    def test_failed_reload_retains_matching_graph_and_kernel_pair(self) -> None:
+        calls = 0
+
+        def analyzer(root, includes):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                raise ValueError("reload failed")
+            return CodeGraph({"source_fingerprint": "stable"})
+
+        state = DashboardState(analyzer=analyzer)
+        wait_for_job(state, state.start_analysis(FIXTURE).id)
+        before = state.intelligence_snapshot()
+        wait_for_job(state, state.start_analysis(FIXTURE).id)
+        after = state.intelligence_snapshot()
+        self.assertIs(before[0], after[0])
+        self.assertIs(before[1], after[1])
+        self.assertEqual(before[3], after[3])

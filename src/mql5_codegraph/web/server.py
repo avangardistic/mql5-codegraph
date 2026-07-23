@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import webbrowser
 
 from ..graph import CodeGraph
+from ..intelligence import IntelligenceError
 from .api import ApiError, DashboardApi
 from .state import DashboardState
 
@@ -50,7 +51,23 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _dispatch_error(self, error: Exception) -> None:
-        if isinstance(error, ApiError):
+        if isinstance(error, IntelligenceError):
+            statuses = {
+                "invalid_request": 400,
+                "invalid_parameter": 400,
+                "missing_target": 400,
+                "unsupported_operation": 409,
+                "unsupported_contract_version": 409,
+                "unsupported_graph_schema": 409,
+                "graph_not_ready": 409,
+                "graph_identity_mismatch": 409,
+                "graph_integrity_error": 422,
+            }
+            self._json(
+                statuses.get(error.code, 500),
+                {"error": error.to_dict()},
+            )
+        elif isinstance(error, ApiError):
             self._json(error.status, error.to_dict())
         else:
             self._json(500, {"error": {"code": "internal_error", "message": "Unexpected server error"}})
@@ -86,7 +103,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
-            if parsed.path != "/api/analyze":
+            intelligence_prefix = "/api/v1/intelligence/"
+            is_intelligence = parsed.path.startswith(intelligence_prefix)
+            if parsed.path != "/api/analyze" and not is_intelligence:
                 raise ApiError(404, "endpoint_not_found", "API endpoint was not found")
             length_value = self.headers.get("Content-Length")
             if length_value is None:
@@ -101,8 +120,22 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise ApiError(400, "invalid_json", "Request body must contain valid UTF-8 JSON") from error
-            status, response = self.api.analyze(payload)
-            self._json(status, response)
+            if parsed.path == "/api/analyze":
+                status, response = self.api.analyze(payload)
+                return self._json(status, response)
+            route_operation = parsed.path.removeprefix(intelligence_prefix)
+            operations = {
+                "query": "query",
+                "context": "context",
+                "impact": "impact",
+                "diagnostics": "diagnostics",
+                "path": "path",
+                "context-package": "context_package",
+            }
+            operation = operations.get(route_operation)
+            if operation is None:
+                raise ApiError(404, "endpoint_not_found", "API endpoint was not found")
+            self._json(200, self.api.intelligence(operation, payload))
         except Exception as error:
             self._dispatch_error(error)
 

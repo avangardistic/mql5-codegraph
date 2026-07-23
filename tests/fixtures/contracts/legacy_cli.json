@@ -1,0 +1,355 @@
+{
+  "fixture": "basic_ea",
+  "encoding": "utf-8",
+  "newline": "LF",
+  "cases": [
+    {
+      "name": "analyze_json",
+      "arguments": ["analyze", "<SOURCE>", "--output", "<GRAPH>", "--json"],
+      "normalization": {"stdout_json.output": "<GRAPH>"},
+      "exit_code": 0,
+      "stdout_sha256": "1fcd56315c227c97f692a3e7913770ef0ec210faf03e5a57b609fd48aa9afa23",
+      "stderr": "",
+      "stdout_json": {
+        "diagnostics": 5,
+        "edges": 22,
+        "files": 3,
+        "nodes": 16,
+        "output": "<GRAPH>",
+        "source_fingerprint": "4b4e4f1c87fad4f46960c8782cbc420bdb8af67951ec316d2a09da9a52c85e45"
+      }
+    },
+    {
+      "name": "analyze_human",
+      "arguments": ["analyze", "<SOURCE>", "--output", "<GRAPH>"],
+      "normalization": {"stdout": {"<runtime graph path>": "<GRAPH>"}},
+      "exit_code": 0,
+      "stdout_sha256": "8f7bd1e05c42cb28de120054749970b3b0d77bf557f6c59fe145d9c1931a7a37",
+      "stderr": "",
+      "stdout": "Indexed 3 files: 16 nodes, 22 edges, 5 diagnostics -> <GRAPH>\n"
+    },
+    {
+      "name": "status_json",
+      "arguments": ["status", "<GRAPH>", "--json"],
+      "exit_code": 0,
+      "stdout_sha256": "23ffabb017193ae9c84999e53bef84dcea602b22ecf96c921a932b10462aac80",
+      "stderr": "",
+      "stdout_json": {
+        "diagnostics": {"info": 4, "warning": 1},
+        "edges": 22,
+        "files": 3,
+        "nodes": 16,
+        "schema_version": "1.0.0",
+        "source_fingerprint": "4b4e4f1c87fad4f46960c8782cbc420bdb8af67951ec316d2a09da9a52c85e45"
+      }
+    },
+    {
+      "name": "status_human",
+      "arguments": ["status", "<GRAPH>"],
+      "exit_code": 0,
+      "stdout_sha256": "e7364023d9537a8af82b5977953afac4835d87dee6a2e5635d6a41171fb502ac",
+      "stderr": "",
+      "stdout": "Schema 1.0.0: 3 files, 16 nodes, 22 edges\n"
+    },
+    {
+      "name": "query_json",
+      "arguments": ["query", "<GRAPH>", "OnTick", "--json"],
+      "exit_code": 0,
+      "stdout_sha256": "eb306156470c5c4c99a0c8688e95397ac3974989462cc6e821d134c84ef7656b",
+      "stderr": "",
+      "stdout_json": [
+        {
+          "attributes": {
+            "parameter_count": 0,
+            "signature": "OnTick()"
+          },
+          "id": "symbol:584ea29f9a049db63baa",
+          "kind": "event_handler",
+          "location": {
+            "column": 6,
+            "file": "BasicEA.mq5",
+            "line": 12
+          },
+          "name": "OnTick",
+          "qualified_name": "OnTick"
+        }
+      ]
+    },
+    {
+      "name": "query_human",
+      "arguments": ["query", "<GRAPH>", "OnTick"],
+      "exit_code": 0,
+      "stdout_sha256": "6b8f39354a63085388d15fbc2f86142b8717fedd6aca2c58ffdbaeecc6e28115",
+      "stderr": "",
+      "stdout": "event_handler: OnTick\n"
+    },
+    {
+      "name": "query_empty_human",
+      "arguments": ["query", "<GRAPH>", "DoesNotExist"],
+      "exit_code": 0,
+      "stdout_sha256": "4209f934eb97c8d5d559c4c584e4fb931c748f88e639f3c225aacebd3d5a3abf",
+      "stderr": "",
+      "stdout": "No matches\n"
+    },
+    {
+      "name": "context_json",
+      "arguments": [
+        "context",
+        "<GRAPH>",
+        "CalculateLots",
+        "--depth",
+        "1",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "c3d2721fdf434dc5cb595ea2ea4a5916007b0cdc5aada858234e19ed6661c96a",
+      "stderr": "",
+      "stdout_json": {
+        "edges": [
+          {
+            "attributes": {},
+            "confidence": 1.0,
+            "id": "edge:afaacae0dddece6ec459",
+            "location": {
+              "column": 11,
+              "file": "Risk.mqh",
+              "line": 6
+            },
+            "origin": "extracted",
+            "relationship": "defines",
+            "source": "file:ae7c46ed6eb3766b8c2d",
+            "target": "symbol:bfa036a6cbac7508c6be"
+          },
+          {
+            "attributes": {
+              "argument_count": 1,
+              "qualifier": "risk_manager"
+            },
+            "confidence": 1.0,
+            "id": "edge:b8d2bf4ccce3f50ae4bf",
+            "location": {
+              "column": 37,
+              "file": "BasicEA.mq5",
+              "line": 14
+            },
+            "origin": "resolved",
+            "relationship": "calls",
+            "source": "symbol:584ea29f9a049db63baa",
+            "target": "symbol:bfa036a6cbac7508c6be"
+          },
+          {
+            "attributes": {
+              "argument_count": 2,
+              "qualifier": null
+            },
+            "confidence": 0.5,
+            "id": "edge:c35a60de35047754bf18",
+            "location": {
+              "column": 14,
+              "file": "Risk.mqh",
+              "line": 8
+            },
+            "origin": "extracted",
+            "relationship": "calls",
+            "source": "symbol:bfa036a6cbac7508c6be",
+            "target": "external:93629e817df5206b2c08"
+          }
+        ],
+        "nodes": [
+          {
+            "attributes": {"external": true},
+            "id": "external:93629e817df5206b2c08",
+            "kind": "external_function",
+            "name": "NormalizeDouble",
+            "qualified_name": "MQL5::NormalizeDouble"
+          },
+          {
+            "attributes": {"extension": ".mqh"},
+            "id": "file:ae7c46ed6eb3766b8c2d",
+            "kind": "file",
+            "name": "Risk.mqh",
+            "qualified_name": "Risk.mqh"
+          },
+          {
+            "attributes": {
+              "parameter_count": 0,
+              "signature": "OnTick()"
+            },
+            "id": "symbol:584ea29f9a049db63baa",
+            "kind": "event_handler",
+            "location": {
+              "column": 6,
+              "file": "BasicEA.mq5",
+              "line": 12
+            },
+            "name": "OnTick",
+            "qualified_name": "OnTick"
+          },
+          {
+            "attributes": {
+              "parameter_count": 1,
+              "signature": "CRiskManager::CalculateLots(const double risk)"
+            },
+            "id": "symbol:bfa036a6cbac7508c6be",
+            "kind": "method",
+            "location": {
+              "column": 11,
+              "file": "Risk.mqh",
+              "line": 6
+            },
+            "name": "CalculateLots",
+            "qualified_name": "CRiskManager::CalculateLots"
+          }
+        ]
+      }
+    },
+    {
+      "name": "context_human",
+      "arguments": [
+        "context",
+        "<GRAPH>",
+        "CalculateLots",
+        "--depth",
+        "1"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "3e0ae9fc3e2ac2985b76d8076ad3575d04c52b0cd662a2237d60ec8ebc3831f3",
+      "stderr": "",
+      "stdout": "4 nodes, 3 edges\n"
+    },
+    {
+      "name": "impact_json",
+      "arguments": [
+        "impact",
+        "<GRAPH>",
+        "CalculateLots",
+        "--depth",
+        "3",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "f29655e3fa38af306ebac8ac389649d40bbb3013a114076c4e1f94916b29e92b",
+      "stderr": "",
+      "stdout_json": [
+        {
+          "distance": 1,
+          "edge_path": ["edge:afaacae0dddece6ec459"],
+          "node": {
+            "attributes": {"extension": ".mqh"},
+            "id": "file:ae7c46ed6eb3766b8c2d",
+            "kind": "file",
+            "name": "Risk.mqh",
+            "qualified_name": "Risk.mqh"
+          }
+        },
+        {
+          "distance": 1,
+          "edge_path": ["edge:b8d2bf4ccce3f50ae4bf"],
+          "node": {
+            "attributes": {
+              "parameter_count": 0,
+              "signature": "OnTick()"
+            },
+            "id": "symbol:584ea29f9a049db63baa",
+            "kind": "event_handler",
+            "location": {
+              "column": 6,
+              "file": "BasicEA.mq5",
+              "line": 12
+            },
+            "name": "OnTick",
+            "qualified_name": "OnTick"
+          }
+        },
+        {
+          "distance": 2,
+          "edge_path": [
+            "edge:afaacae0dddece6ec459",
+            "edge:4fb103589a1ad64c26c5"
+          ],
+          "node": {
+            "attributes": {"extension": ".mq5"},
+            "id": "file:7cf61f9bcf208fc2cf4a",
+            "kind": "file",
+            "name": "BasicEA.mq5",
+            "qualified_name": "BasicEA.mq5"
+          }
+        },
+        {
+          "distance": 2,
+          "edge_path": [
+            "edge:b8d2bf4ccce3f50ae4bf",
+            "edge:1f6c07a77ec7857c972e"
+          ],
+          "node": {
+            "attributes": {"platform": "MetaTrader 5"},
+            "id": "runtime:d6debd55ea376705fb5c",
+            "kind": "runtime",
+            "name": "MetaTrader 5 Terminal",
+            "qualified_name": "runtime::MetaTrader5Terminal"
+          }
+        }
+      ]
+    },
+    {
+      "name": "impact_human",
+      "arguments": [
+        "impact",
+        "<GRAPH>",
+        "CalculateLots",
+        "--depth",
+        "3"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "a50c47f2bdc68a266dfa74d49f36f211bbcd14a00239878e87879d85c94e4766",
+      "stderr": "",
+      "stdout": "d=1 file: Risk.mqh\nd=1 event_handler: OnTick\nd=2 file: BasicEA.mq5\nd=2 runtime: runtime::MetaTrader5Terminal\n"
+    },
+    {
+      "name": "missing_context",
+      "arguments": ["context", "<GRAPH>", "DoesNotExist", "--json"],
+      "exit_code": 2,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr": "No symbol matches 'DoesNotExist'\n",
+      "stdout": ""
+    },
+    {
+      "name": "export_json",
+      "arguments": [
+        "export",
+        "<GRAPH>",
+        "--format",
+        "graphml",
+        "--output",
+        "<GRAPHML>",
+        "--json"
+      ],
+      "normalization": {"stdout_json.output": "<GRAPHML>"},
+      "exit_code": 0,
+      "stdout_sha256": "8b46d5ec518501b5762223f1cb28d6f5cf877e1a1d07827b285c08b0ccc283f1",
+      "stderr": "",
+      "stdout_json": {
+        "edges": 22,
+        "format": "graphml",
+        "nodes": 16,
+        "output": "<GRAPHML>"
+      }
+    },
+    {
+      "name": "export_human",
+      "arguments": [
+        "export",
+        "<GRAPH>",
+        "--format",
+        "graphml",
+        "--output",
+        "<GRAPHML>"
+      ],
+      "normalization": {"stdout": {"<runtime graphml path>": "<GRAPHML>"}},
+      "exit_code": 0,
+      "stdout_sha256": "6ce386b1353bc5697a0cf5e6eff934d2268920e94559268d94d11a2f80b4dd4c",
+      "stderr": "",
+      "stdout": "Exported graphml -> <GRAPHML>\n"
+    }
+  ]
+}

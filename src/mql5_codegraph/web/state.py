@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from ..graph import CodeGraph
 from ..indexer import analyze_repository
+from ..intelligence import IntelligenceKernel
 
 
 def _utc_now() -> str:
@@ -52,6 +53,7 @@ class DashboardState:
         self._analyzer = analyzer
         self._max_jobs = max_jobs
         self._graph: CodeGraph | None = None
+        self._kernel: IntelligenceKernel | None = None
         self._root: Path | None = None
         self._graph_version = 0
         self._active_job_id: str | None = None
@@ -61,9 +63,12 @@ class DashboardState:
     def load_graph(self, graph: CodeGraph, root: str | Path) -> None:
         resolved_root = Path(root).resolve()
         with self._lock:
+            revision = self._graph_version + 1
+            kernel = IntelligenceKernel(graph, snapshot_revision=revision)
             self._graph = graph
+            self._kernel = kernel
             self._root = resolved_root
-            self._graph_version += 1
+            self._graph_version = revision
             self._last_error = None
 
     def start_analysis(self, root: str | Path, include_roots: Iterable[str | Path] = ()) -> AnalysisJob:
@@ -98,9 +103,12 @@ class DashboardState:
                 "source_fingerprint": graph.metadata.get("source_fingerprint"),
             }
             with self._lock:
+                revision = self._graph_version + 1
+                kernel = IntelligenceKernel(graph, snapshot_revision=revision)
                 self._graph = graph
+                self._kernel = kernel
                 self._root = Path(job.root)
-                self._graph_version += 1
+                self._graph_version = revision
                 self._last_error = None
                 job.status = "completed"
                 job.summary = summary
@@ -125,6 +133,24 @@ class DashboardState:
     def snapshot(self) -> tuple[CodeGraph | None, Path | None, int]:
         with self._lock:
             return self._graph, self._root, self._graph_version
+
+    def intelligence_snapshot(
+        self,
+    ) -> tuple[
+        CodeGraph | None,
+        IntelligenceKernel | None,
+        Path | None,
+        int,
+    ]:
+        """Return one atomically published graph/kernel snapshot pair."""
+
+        with self._lock:
+            return (
+                self._graph,
+                self._kernel,
+                self._root,
+                self._graph_version,
+            )
 
     def status(self) -> dict[str, object]:
         with self._lock:

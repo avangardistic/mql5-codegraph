@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field
 from hashlib import sha1
 import json
@@ -184,57 +183,16 @@ class CodeGraph:
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
     def find_nodes(self, text: str, kind: str | None = None) -> list[GraphNode]:
-        needle = text.casefold()
-        return sorted(
-            (node for node in self.nodes.values()
-             if (kind is None or node.kind == kind)
-             and (needle in node.name.casefold() or needle in node.qualified_name.casefold())),
-            key=lambda node: (node.qualified_name.casefold(), node.id),
-        )
+        from .intelligence import IntelligenceKernel
+
+        return IntelligenceKernel(self).legacy_find_nodes(text, kind)
 
     def neighborhood(self, seeds: Iterable[str], depth: int = 1) -> dict[str, Any]:
-        seen = set(seeds)
-        queue = deque((seed, 0) for seed in seen)
-        selected_edges: dict[str, GraphEdge] = {}
-        incident: dict[str, list[GraphEdge]] = {}
-        for edge in self.edges.values():
-            incident.setdefault(edge.source, []).append(edge)
-            incident.setdefault(edge.target, []).append(edge)
-        while queue:
-            current, distance = queue.popleft()
-            if distance >= depth:
-                continue
-            for edge in incident.get(current, []):
-                selected_edges[edge.id] = edge
-                other = edge.target if edge.source == current else edge.source
-                if other not in seen:
-                    seen.add(other)
-                    queue.append((other, distance + 1))
-        return {
-            "nodes": [self.nodes[node_id].to_dict() for node_id in sorted(seen) if node_id in self.nodes],
-            "edges": [selected_edges[edge_id].to_dict() for edge_id in sorted(selected_edges)],
-        }
+        from .intelligence import IntelligenceKernel
+
+        return IntelligenceKernel(self).legacy_neighborhood(seeds, depth)
 
     def upstream_impact(self, seeds: Iterable[str], depth: int = 3) -> list[dict[str, Any]]:
-        allowed = {"calls", "includes", "defines", "runtime_dispatches", "may_trigger_event"}
-        reverse: dict[str, list[GraphEdge]] = {}
-        for edge in self.edges.values():
-            if edge.relationship in allowed:
-                reverse.setdefault(edge.target, []).append(edge)
-        queue = deque((seed, 0, []) for seed in seeds)
-        best: dict[str, tuple[int, list[str]]] = {seed: (0, []) for seed in seeds}
-        while queue:
-            current, distance, path = queue.popleft()
-            if distance >= depth:
-                continue
-            for edge in sorted(reverse.get(current, []), key=lambda item: item.id):
-                candidate = distance + 1
-                new_path = path + [edge.id]
-                if edge.source not in best or candidate < best[edge.source][0]:
-                    best[edge.source] = (candidate, new_path)
-                    queue.append((edge.source, candidate, new_path))
-        return [
-            {"node": self.nodes[node_id].to_dict(), "distance": distance, "edge_path": path}
-            for node_id, (distance, path) in sorted(best.items(), key=lambda item: (item[1][0], item[0]))
-            if distance > 0 and node_id in self.nodes
-        ]
+        from .intelligence import IntelligenceKernel
+
+        return IntelligenceKernel(self).legacy_upstream_impact(seeds, depth)

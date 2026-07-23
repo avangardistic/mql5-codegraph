@@ -11,6 +11,10 @@ from typing import Any, Sequence
 from .exporters.graphml import export_graphml
 from .graph import CodeGraph
 from .indexer import analyze_repository
+from .intelligence import (
+    IntelligenceError,
+    IntelligenceKernel,
+)
 
 
 def _emit(value: Any, as_json: bool, human: str | None = None) -> None:
@@ -63,6 +67,71 @@ def _parser() -> argparse.ArgumentParser:
     impact.add_argument("--depth", type=int, default=3)
     impact.add_argument("--json", action="store_true")
 
+    intelligence = subcommands.add_parser(
+        "intelligence", help="Run normalized versioned intelligence operations"
+    )
+    intelligence_operations = intelligence.add_subparsers(
+        dest="intelligence_operation", required=True
+    )
+    defaults = {
+        "query": (1, 30, "both"),
+        "context": (1, 900, "both"),
+        "impact": (3, 2000, "incoming"),
+        "diagnostics": (1, 250, "both"),
+    }
+    for operation, (depth, items, direction) in defaults.items():
+        operation_parser = intelligence_operations.add_parser(operation)
+        operation_parser.add_argument("graph")
+        if operation != "diagnostics":
+            operation_parser.add_argument("target")
+        operation_parser.add_argument("--contract-version", default="1")
+        operation_parser.add_argument("--max-depth", type=int, default=depth)
+        operation_parser.add_argument("--max-items", type=int, default=items)
+        operation_parser.add_argument(
+            "--direction",
+            choices=["incoming", "outgoing", "both"],
+            default=direction,
+        )
+        operation_parser.add_argument(
+            "--relationship-type", action="append", default=[]
+        )
+        operation_parser.add_argument("--json", action="store_true")
+
+    path = intelligence_operations.add_parser("path")
+    path.add_argument("graph")
+    path.add_argument("source")
+    path.add_argument("target")
+    path.add_argument("--contract-version", default="1")
+    path.add_argument("--max-depth", type=int, default=5)
+    path.add_argument("--max-paths", type=int, default=3)
+    path.add_argument("--max-expansions", type=int, default=10_000)
+    path.add_argument(
+        "--direction",
+        choices=["incoming", "outgoing", "both"],
+        default="outgoing",
+    )
+    path.add_argument("--relationship-type", action="append", default=[])
+    path.add_argument("--json", action="store_true")
+
+    context_package = intelligence_operations.add_parser("context-package")
+    context_package.set_defaults(intelligence_operation="context_package")
+    context_package.add_argument("graph")
+    context_package.add_argument("target")
+    context_package.add_argument("--contract-version", default="1")
+    context_package.add_argument("--max-depth", type=int, default=2)
+    context_package.add_argument("--context-units", type=int, default=100)
+    context_package.add_argument("--max-expansions", type=int, default=10_000)
+    context_package.add_argument(
+        "--direction",
+        choices=["incoming", "outgoing", "both"],
+        default="both",
+    )
+    context_package.add_argument(
+        "--relationship-type", action="append", default=[]
+    )
+    context_package.add_argument("--node-kind", action="append", default=[])
+    context_package.add_argument("--json", action="store_true")
+
     export = subcommands.add_parser("export", help="Export a saved graph")
     export.add_argument("graph")
     export.add_argument("--format", choices=["graphml"], required=True)
@@ -102,6 +171,59 @@ def run(arguments: Sequence[str] | None = None) -> int:
         _emit(summary, args.json,
               f"Indexed {summary['files']} files: {summary['nodes']} nodes, "
               f"{summary['edges']} edges, {summary['diagnostics']} diagnostics -> {args.output}")
+        return 0
+
+    if args.command == "intelligence":
+        graph = CodeGraph.load(args.graph)
+        requested_version = (
+            "1.0.0" if args.contract_version == "1" else args.contract_version
+        )
+        if args.intelligence_operation == "diagnostics":
+            targets = []
+        elif args.intelligence_operation == "path":
+            targets = [
+                {"value": args.source, "kind": None},
+                {"value": args.target, "kind": None},
+            ]
+        else:
+            targets = [{"value": args.target, "kind": None}]
+        try:
+            request = {
+                "contract_version": requested_version,
+                "operation": args.intelligence_operation,
+                "targets": targets,
+                "direction": args.direction,
+                "relationship_types": sorted(set(args.relationship_type)),
+                "node_kinds": sorted(set(getattr(args, "node_kind", []))),
+                "bounds": {
+                    "max_depth": args.max_depth,
+                    "max_items": getattr(args, "max_items", 30),
+                    "max_paths": getattr(args, "max_paths", 3),
+                    "max_expansions": getattr(args, "max_expansions", 10_000),
+                    "context_units": getattr(args, "context_units", 100),
+                },
+                "expected_source_fingerprint": None,
+                "client_request_id": None,
+            }
+            result = IntelligenceKernel(graph).execute(request)
+        except (ValueError, IntelligenceError) as error:
+            normalized = (
+                error
+                if isinstance(error, IntelligenceError)
+                else IntelligenceError.invalid_request(str(error))
+            )
+            payload = {"error": normalized.to_dict()}
+            if args.json:
+                print(
+                    json.dumps(
+                        payload, ensure_ascii=False, indent=2, sort_keys=True
+                    ),
+                    file=sys.stderr,
+                )
+            else:
+                print(f"error: {normalized.message}", file=sys.stderr)
+            return 1
+        _emit(result.to_dict(), args.json, result.to_json().rstrip())
         return 0
 
     graph = CodeGraph.load(args.graph)
