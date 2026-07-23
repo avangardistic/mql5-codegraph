@@ -18,6 +18,11 @@ EVENT_HANDLERS = {
 
 _CONTROL_WORDS = {"if", "for", "while", "switch", "return", "sizeof", "catch", "else"}
 _POST_SIGNATURE = {"const", "override", "final", "virtual", "inline"}
+_NON_TYPE_WORDS = _CONTROL_WORDS | {
+    "break", "case", "continue", "default", "delete", "do", "new", "public",
+    "private", "protected", "throw", "true", "false",
+}
+_DECLARATION_FOLLOW = {";", "=", "[", ",", ")"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +49,7 @@ class CallSite:
     caller: str
     name: str
     qualifier: str | None
+    receiver_type: str | None
     argument_count: int
     location: SourceLocation
 
@@ -55,6 +61,14 @@ class ParseResult:
     declarations: list[Declaration] = field(default_factory=list)
     calls: list[CallSite] = field(default_factory=list)
     diagnostics: list[Diagnostic] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _FunctionRange:
+    declaration: Declaration
+    open_paren: int
+    close_paren: int
+    owner_name: str | None
 
 
 def _pairs(tokens: list[Token], opening: str, closing: str, file: str) -> tuple[dict[int, int], list[Diagnostic]]:
@@ -109,6 +123,33 @@ def _argument_count(tokens: list[Token], start: int, end: int) -> int:
     return count if has_value else 0
 
 
+def _binding_at(tokens: list[Token], index: int) -> tuple[str, str] | None:
+    """Return a simple C-like variable binding ending at ``index``."""
+
+    if index <= 0 or index + 1 >= len(tokens):
+        return None
+    variable = tokens[index]
+    if variable.kind != "identifier" or tokens[index + 1].value not in _DECLARATION_FOLLOW:
+        return None
+    cursor = index - 1
+    while cursor >= 0 and tokens[cursor].value in {"&", "*"}:
+        cursor -= 1
+    if cursor < 0 or tokens[cursor].kind != "identifier":
+        return None
+    type_name = tokens[cursor].value
+    if type_name in _NON_TYPE_WORDS:
+        return None
+    return variable.value, type_name
+
+
+def _unique_binding_type(
+    bindings: list[tuple[int, str, str]],
+    variable: str,
+) -> str | None:
+    matches = {type_name for _, name, type_name in bindings if name == variable}
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
 def parse_source(text: str, file: str) -> ParseResult:
     lexed = tokenize(text, file)
     tokens = lexed.tokens[:-1]
@@ -158,7 +199,7 @@ def parse_source(text: str, file: str) -> ParseResult:
         elif token.value == "}":
             depth = max(0, depth - 1)
 
-    functions: list[Declaration] = []
+    functions: list[_FunctionRange] = []
     for open_paren, close_paren in sorted(parens.items()):
         if open_paren == 0:
             continue
@@ -196,13 +237,73 @@ def parse_source(text: str, file: str) -> ParseResult:
             body_start=body_start, body_end=body_end,
             parameter_count=_argument_count(tokens, open_paren, close_paren),
         )
-        functions.append(declaration)
+        functions.append(_FunctionRange(
+            declaration=declaration,
+            open_paren=open_paren,
+            close_paren=close_paren,
+            owner_name=owner_name,
+        ))
         result.declarations.append(declaration)
 
-    for function in functions:
+    def inside_function(index: int) -> bool:
+        for item in functions:
+            if item.open_paren < index < item.close_paren:
+                return True
+            declaration = item.declaration
+            if (
+                declaration.body_start is not None
+                and declaration.body_start < index
+                and (
+                    declaration.body_end is None
+                    or index < declaration.body_end
+                )
+            ):
+                return True
+        return False
+
+    outer_bindings: list[tuple[str | None, int, str, str]] = []
+    for index in range(len(tokens)):
+        if inside_function(index):
+            continue
+        binding = _binding_at(tokens, index)
+        if binding is None:
+            continue
+        owner = next(
+            (item for item in type_ranges if item[0] < index < item[1]),
+            None,
+        )
+        outer_bindings.append((
+            owner[2] if owner else None,
+            index,
+            binding[0],
+            binding[1],
+        ))
+
+    for function_range in functions:
+        function = function_range.declaration
         if function.body_start is None:
             continue
         end = function.body_end if function.body_end is not None else len(tokens)
+        parameter_bindings = [
+            (index, *binding)
+            for index in range(function_range.open_paren + 1, function_range.close_paren)
+            if (binding := _binding_at(tokens, index)) is not None
+        ]
+        local_bindings = [
+            (index, *binding)
+            for index in range(function.body_start + 1, end)
+            if (binding := _binding_at(tokens, index)) is not None
+        ]
+        member_bindings = [
+            (index, name, type_name)
+            for owner_name, index, name, type_name in outer_bindings
+            if owner_name == function_range.owner_name and owner_name is not None
+        ]
+        global_bindings = [
+            (index, name, type_name)
+            for owner_name, index, name, type_name in outer_bindings
+            if owner_name is None
+        ]
         cursor = function.body_start + 1
         while cursor < end - 1:
             token = tokens[cursor]
@@ -210,10 +311,37 @@ def parse_source(text: str, file: str) -> ParseResult:
                 close = parens.get(cursor + 1)
                 if close is not None and close <= end:
                     qualifier = None
+                    receiver_type = None
                     if cursor >= 2 and tokens[cursor - 1].value in {".", "->", "::"}:
                         qualifier = tokens[cursor - 2].value
+                        if qualifier == "this":
+                            receiver_type = function_range.owner_name
+                        else:
+                            local_matches = [
+                                (index, type_name)
+                                for index, name, type_name in local_bindings
+                                if name == qualifier and index < cursor
+                            ]
+                            if local_matches:
+                                receiver_type = local_matches[-1][1]
+                            if receiver_type is None:
+                                receiver_type = _unique_binding_type(
+                                    parameter_bindings,
+                                    qualifier,
+                                )
+                            if receiver_type is None:
+                                receiver_type = _unique_binding_type(
+                                    member_bindings,
+                                    qualifier,
+                                )
+                            if receiver_type is None:
+                                receiver_type = _unique_binding_type(
+                                    global_bindings,
+                                    qualifier,
+                                )
                     result.calls.append(CallSite(
                         caller=function.qualified_name, name=token.value, qualifier=qualifier,
+                        receiver_type=receiver_type,
                         argument_count=_argument_count(tokens, cursor + 1, close),
                         location=SourceLocation(file, token.line, token.column),
                     ))

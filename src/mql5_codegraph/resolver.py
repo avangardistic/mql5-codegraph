@@ -130,12 +130,33 @@ def build_graph(
             if caller_id is None:
                 continue
             candidates = list(by_short_name.get(call.name, []))
-            same_scope = [item for item in candidates
-                          if item[1].qualified_name.rpartition("::")[0]
-                          == call.caller.rpartition("::")[0]
-                          and item[1].parameter_count == call.argument_count]
             same_arity = [item for item in candidates if item[1].parameter_count == call.argument_count]
-            selected = same_scope or same_arity or candidates
+            receiver_type = call.receiver_type
+            if receiver_type is None and call.qualifier:
+                qualifier_members = [
+                    item for item in candidates
+                    if item[1].qualified_name.rpartition("::")[0] == call.qualifier
+                ]
+                if qualifier_members:
+                    receiver_type = call.qualifier
+            if receiver_type is not None:
+                receiver_members = [
+                    item for item in candidates
+                    if item[1].qualified_name.rpartition("::")[0] == receiver_type
+                ]
+                receiver_arity = [
+                    item for item in receiver_members
+                    if item[1].parameter_count == call.argument_count
+                ]
+                selected = receiver_arity or receiver_members
+            else:
+                same_scope = [
+                    item for item in candidates
+                    if item[1].qualified_name.rpartition("::")[0]
+                    == call.caller.rpartition("::")[0]
+                    and item[1].parameter_count == call.argument_count
+                ]
+                selected = same_scope or same_arity or candidates
             if not selected:
                 target = _external_node(graph, call.name)
                 graph.add_edge(caller_id, target.id, "calls", "extracted", 0.5, call.location,
