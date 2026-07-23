@@ -21,14 +21,19 @@ from .models import (
     NodeSummary,
     TargetResolution,
 )
-from .paths import find_directed_paths_between
+from .paths import TargetDistanceCache, find_directed_paths_between
 from .traversal import EvidenceProbe, traverse_context, traverse_impact
 
 
 class IntelligenceKernel:
     """Own the semantic boundary for one published canonical graph snapshot."""
 
-    __slots__ = ("_index", "_graph_identity", "_evidence_probe")
+    __slots__ = (
+        "_index",
+        "_graph_identity",
+        "_evidence_probe",
+        "_path_distance_cache",
+    )
 
     def __init__(
         self,
@@ -46,6 +51,7 @@ class IntelligenceKernel:
             snapshot_revision=snapshot_revision,
         )
         self._evidence_probe = evidence_probe
+        self._path_distance_cache = TargetDistanceCache(self._index)
 
     @property
     def index(self) -> GraphIndex:
@@ -222,6 +228,7 @@ class IntelligenceKernel:
             direction=request.direction,
             relationship_types=request.relationship_types,
             evidence_probe=self._evidence_probe,
+            _distance_cache=self._path_distance_cache,
         )
         return IntelligenceResult(
             operation=request.operation,

@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from mql5_codegraph.graph import SourceLocation
 from mql5_codegraph.indexer import analyze_repository
+from mql5_codegraph.intelligence import paths as path_module
 from mql5_codegraph.intelligence.errors import IntelligenceError
 from mql5_codegraph.intelligence.index import GraphIndex
 from mql5_codegraph.intelligence.kernel import IntelligenceKernel
@@ -119,6 +121,117 @@ class DirectedPathTests(TestCase):
         self.assertEqual([], payload["diagnostics"])
         self.assertIsNone(payload["context_package"])
         self.assertEqual(before, graph.to_json())
+
+    def test_kernel_reuses_target_distances_within_one_snapshot(self) -> None:
+        source = make_node("Source", node_id="node:source")
+        target = make_node("Target", node_id="node:target")
+        graph = build_graph(
+            [source, target],
+            [make_edge(source, target, edge_id="edge:source-target")],
+        )
+        request = IntelligenceRequest(
+            operation="path",
+            targets=(SymbolSelector(source.id), SymbolSelector(target.id)),
+            direction="outgoing",
+            bounds=IntelligenceBounds(max_depth=1),
+        )
+        first_kernel = IntelligenceKernel(graph, snapshot_revision=1)
+        second_kernel = IntelligenceKernel(graph, snapshot_revision=2)
+
+        with patch.object(
+            path_module,
+            "_minimum_hops_to_targets",
+            wraps=path_module._minimum_hops_to_targets,
+        ) as distance_builder:
+            first = first_kernel.execute(request)
+            repeated = first_kernel.execute(request)
+            replaced = second_kernel.execute(request)
+
+        self.assertEqual(first.to_dict(), repeated.to_dict())
+        self.assertEqual(first.paths, replaced.paths)
+        self.assertEqual(2, distance_builder.call_count)
+        self.assertEqual(1, first.graph_identity.snapshot_revision)
+        self.assertEqual(2, replaced.graph_identity.snapshot_revision)
+
+    def test_kernel_target_distance_cache_is_bounded_lru(self) -> None:
+        source = make_node("Source", node_id="node:source")
+        targets = tuple(
+            make_node(f"Target{position}", node_id=f"node:target-{position}")
+            for position in range(65)
+        )
+        graph = build_graph(
+            [source, *targets],
+            (
+                make_edge(
+                    source,
+                    target,
+                    edge_id=f"edge:source-target-{position}",
+                )
+                for position, target in enumerate(targets)
+            ),
+        )
+        kernel = IntelligenceKernel(graph)
+
+        def request_for(target):
+            return IntelligenceRequest(
+                operation="path",
+                targets=(SymbolSelector(source.id), SymbolSelector(target.id)),
+                direction="outgoing",
+                bounds=IntelligenceBounds(max_depth=1),
+            )
+
+        with patch.object(
+            path_module,
+            "_minimum_hops_to_targets",
+            wraps=path_module._minimum_hops_to_targets,
+        ) as distance_builder:
+            for target in targets:
+                kernel.execute(request_for(target))
+            self.assertEqual(65, distance_builder.call_count)
+
+            kernel.execute(request_for(targets[-1]))
+            self.assertEqual(65, distance_builder.call_count)
+
+            kernel.execute(request_for(targets[0]))
+            self.assertEqual(66, distance_builder.call_count)
+
+    def test_kernel_target_distance_cache_keys_direction_and_relationships(self) -> None:
+        source = make_node("Source", node_id="node:source")
+        middle = make_node("Middle", node_id="node:middle")
+        target = make_node("Target", node_id="node:target")
+        graph = build_graph(
+            [source, middle, target],
+            (
+                make_edge(source, middle, edge_id="edge:source-middle"),
+                make_edge(middle, target, edge_id="edge:middle-target"),
+            ),
+        )
+        kernel = IntelligenceKernel(graph)
+
+        def request_for(direction, relationship_types=()):
+            return IntelligenceRequest(
+                operation="path",
+                targets=(SymbolSelector(source.id), SymbolSelector(target.id)),
+                direction=direction,
+                relationship_types=relationship_types,
+                bounds=IntelligenceBounds(max_depth=2),
+            )
+
+        with patch.object(
+            path_module,
+            "_minimum_hops_to_targets",
+            wraps=path_module._minimum_hops_to_targets,
+        ) as distance_builder:
+            filtered = kernel.execute(request_for("outgoing", ("references",)))
+            connected = kernel.execute(request_for("outgoing", ("calls",)))
+            reverse = kernel.execute(request_for("incoming", ("calls",)))
+            repeated = kernel.execute(request_for("outgoing", ("calls",)))
+
+        self.assertEqual("not_connected", filtered.completion.reason)
+        self.assertEqual((source.id, middle.id, target.id), connected.paths[0].node_ids)
+        self.assertEqual("not_connected", reverse.completion.reason)
+        self.assertEqual(connected.to_dict(), repeated.to_dict())
+        self.assertEqual(3, distance_builder.call_count)
 
     def test_kernel_searches_all_ambiguous_candidates_and_preserves_no_match(self) -> None:
         alpha = make_node(

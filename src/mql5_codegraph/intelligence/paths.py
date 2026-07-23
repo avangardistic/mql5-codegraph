@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections import deque
-from collections.abc import Callable, Iterable
+from collections import OrderedDict, deque
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from heapq import heappop, heappush
 from itertools import count
+from threading import RLock
 
 from ..graph import GraphEdge
 from .index import GraphIndex
@@ -22,6 +23,7 @@ EvidenceProbe = Callable[[GraphEdge], tuple[str, str | None]]
 
 ORIGIN_PENALTY = {"extracted": 0, "resolved": 1, "runtime": 1, "inferred": 3}
 DEGRADED_EVIDENCE_STATES = frozenset({"stale", "unavailable"})
+TARGET_DISTANCE_CACHE_CAPACITY = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +143,59 @@ def _minimum_hops_to_targets(
     return distances
 
 
+class TargetDistanceCache:
+    """Thread-safe bounded target distances owned by one immutable graph index."""
+
+    __slots__ = ("_entries", "_index", "_lock", "_max_entries")
+
+    def __init__(
+        self,
+        index: GraphIndex,
+        *,
+        max_entries: int = TARGET_DISTANCE_CACHE_CAPACITY,
+    ) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be positive")
+        self._index = index
+        self._max_entries = max_entries
+        self._entries: OrderedDict[
+            tuple[tuple[str, ...], str, tuple[str, ...]],
+            dict[str, int],
+        ] = OrderedDict()
+        self._lock = RLock()
+
+    def get(
+        self,
+        index: GraphIndex,
+        target_ids: Iterable[str],
+        direction: str,
+        allowed_relationships: frozenset[str],
+    ) -> Mapping[str, int]:
+        if index is not self._index:
+            raise ValueError("target-distance cache belongs to another graph index")
+        key = (
+            tuple(sorted(set(target_ids))),
+            direction,
+            tuple(sorted(allowed_relationships)),
+        )
+        with self._lock:
+            cached = self._entries.get(key)
+            if cached is not None:
+                self._entries.move_to_end(key)
+                return cached
+
+            distances = _minimum_hops_to_targets(
+                index,
+                key[0],
+                direction,
+                frozenset(key[2]),
+            )
+            self._entries[key] = distances
+            if len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+            return distances
+
+
 def _completion(
     *,
     path_count: int,
@@ -217,6 +272,7 @@ def find_directed_paths_between(
     direction: str = "outgoing",
     relationship_types: Iterable[str] = (),
     evidence_probe: EvidenceProbe | None = None,
+    _distance_cache: TargetDistanceCache | None = None,
 ) -> PathSearchResult:
     """Search all resolved source/target alternatives under one shared budget."""
 
@@ -233,11 +289,20 @@ def find_directed_paths_between(
     allowed_relationships = frozenset(relationship_types)
     evidence_cache: dict[str, EvidenceReference] = {}
     transition_cache: dict[str, tuple[tuple[GraphEdge, str, str], ...]] = {}
-    minimum_hops = _minimum_hops_to_targets(
-        index,
-        targets,
-        direction,
-        allowed_relationships,
+    minimum_hops = (
+        _distance_cache.get(
+            index,
+            targets,
+            direction,
+            allowed_relationships,
+        )
+        if _distance_cache is not None
+        else _minimum_hops_to_targets(
+            index,
+            targets,
+            direction,
+            allowed_relationships,
+        )
     )
 
     def evidence_for(edge: GraphEdge) -> EvidenceReference:
