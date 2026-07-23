@@ -1,9 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPConnection
 from hashlib import sha256
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Thread
+from threading import Barrier, Event, Thread
 from time import monotonic, sleep
 from unittest import TestCase
 from unittest.mock import patch
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from mql5_codegraph.graph import SourceLocation
 from mql5_codegraph.indexer import analyze_repository
 from mql5_codegraph.intelligence import IntelligenceError
+from mql5_codegraph.intelligence import paths as path_module
 from mql5_codegraph.web.api import ApiError, DashboardApi
 from mql5_codegraph.web.server import create_server
 from mql5_codegraph.web.state import DashboardState
@@ -202,6 +204,121 @@ class DashboardHttpTests(TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+    def test_concurrent_path_requests_share_one_distance_build(self) -> None:
+        source = make_node("Source", node_id="node:source")
+        middle = make_node("Middle", node_id="node:middle")
+        target = make_node("Target", node_id="node:target")
+        state = DashboardState()
+        state.load_graph(
+            build_graph(
+                [source, middle, target],
+                (
+                    make_edge(source, middle, edge_id="edge:source-middle"),
+                    make_edge(middle, target, edge_id="edge:middle-target"),
+                ),
+            ),
+            Path.cwd(),
+        )
+        server = create_server(state, port=0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        api = server.RequestHandlerClass.keywords["api"]
+        payload = {
+            "contract_version": "1.0.0",
+            "targets": [
+                {"value": source.id, "kind": None},
+                {"value": target.id, "kind": None},
+            ],
+            "bounds": {
+                "max_depth": 2,
+                "max_items": 30,
+                "max_paths": 3,
+                "max_expansions": 100,
+                "context_units": 100,
+            },
+        }
+        body = json.dumps(payload).encode("utf-8")
+        workers = 6
+        handler_start = Barrier(workers)
+        builder_started = Event()
+        release_builder = Event()
+        original_builder = path_module._minimum_hops_to_targets
+        original_intelligence = api.intelligence
+
+        def delayed_builder(*args, **kwargs):
+            builder_started.set()
+            if not release_builder.wait(2):
+                raise TimeoutError("distance builder release timed out")
+            return original_builder(*args, **kwargs)
+
+        def synchronized_intelligence(operation, request):
+            handler_start.wait(timeout=3)
+            return original_intelligence(operation, request)
+
+        def post() -> tuple[int, str | None, bytes]:
+            connection = HTTPConnection(
+                "127.0.0.1",
+                server.server_port,
+                timeout=3,
+            )
+            connection.request(
+                "POST",
+                "/api/v1/intelligence/path",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            result = (
+                response.status,
+                response.getheader("Content-Type"),
+                response.read(),
+            )
+            connection.close()
+            return result
+
+        try:
+            with patch.object(
+                path_module,
+                "_minimum_hops_to_targets",
+                side_effect=delayed_builder,
+            ) as distance_builder:
+                with patch.object(
+                    api,
+                    "intelligence",
+                    side_effect=synchronized_intelligence,
+                ):
+                    with ThreadPoolExecutor(max_workers=workers) as executor:
+                        futures = [executor.submit(post) for _ in range(workers)]
+                        try:
+                            self.assertTrue(builder_started.wait(2))
+                            sleep(0.05)
+                            self.assertEqual(1, distance_builder.call_count)
+                        finally:
+                            release_builder.set()
+                        results = [future.result(timeout=3) for future in futures]
+
+            self.assertEqual(1, distance_builder.call_count)
+            self.assertEqual({200}, {status for status, _, _ in results})
+            self.assertEqual(
+                {"application/json; charset=utf-8"},
+                {content_type for _, content_type, _ in results},
+            )
+            self.assertEqual(1, len({sha256(item[2]).hexdigest() for item in results}))
+            response_payload = json.loads(results[0][2])
+            self.assertEqual("complete", response_payload["completion"]["reason"])
+            self.assertEqual(
+                [source.id, middle.id, target.id],
+                response_payload["paths"][0]["node_ids"],
+            )
+        finally:
+            release_builder.set()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_normalized_path_route_status_mapping_and_content_type(self) -> None:
         state = ready_state()
