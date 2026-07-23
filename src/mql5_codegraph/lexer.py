@@ -36,15 +36,19 @@ def tokenize(text: str, file: str) -> LexResult:
     line = 1
     column = 1
     length = len(text)
+    line_has_content = False
 
-    def advance(value: str) -> None:
-        nonlocal line, column
+    def advance(value: str, *, content: bool = True) -> None:
+        nonlocal line, column, line_has_content
         newlines = value.count("\n")
         if newlines:
             line += newlines
-            column = len(value.rsplit("\n", 1)[-1]) + 1
+            suffix = value.rsplit("\n", 1)[-1]
+            column = len(suffix) + 1
+            line_has_content = content and bool(suffix.strip())
         else:
             column += len(value)
+            line_has_content = line_has_content or content
 
     while index < length:
         char = text[index]
@@ -52,11 +56,11 @@ def tokenize(text: str, file: str) -> LexResult:
             start = index
             while index < length and text[index].isspace():
                 index += 1
-            advance(text[start:index])
+            advance(text[start:index], content=False)
             continue
 
         start_line, start_column, start_offset = line, column, index
-        at_line_start = index == 0 or text[index - 1] == "\n" or text[text.rfind("\n", 0, index) + 1:index].strip() == ""
+        at_line_start = not line_has_content
         if char == "#" and at_line_start:
             end = text.find("\n", index)
             if end == -1:

@@ -17,11 +17,27 @@ DEFAULT_EXCLUDED_DIRECTORIES = {".git", ".gitnexus", "graphify-out", "build", "d
 
 
 def discover_sources(root: Path, excluded: Iterable[str] = ()) -> list[Path]:
+    root = root.resolve()
     excluded_names = DEFAULT_EXCLUDED_DIRECTORIES | set(excluded)
+    sources: set[Path] = set()
+    for path in root.rglob("*"):
+        if path.suffix.lower() not in {".mq5", ".mqh"}:
+            continue
+        try:
+            lexical_relative = path.relative_to(root)
+            resolved = path.resolve()
+            resolved_relative = resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if (
+            any(part in excluded_names for part in lexical_relative.parts)
+            or any(part in excluded_names for part in resolved_relative.parts)
+            or not resolved.is_file()
+        ):
+            continue
+        sources.add(resolved)
     return sorted(
-        (path for path in root.rglob("*")
-         if path.is_file() and path.suffix.lower() in {".mq5", ".mqh"}
-         and not any(part in excluded_names for part in path.relative_to(root).parts)),
+        sources,
         key=lambda path: path.relative_to(root).as_posix().casefold(),
     )
 

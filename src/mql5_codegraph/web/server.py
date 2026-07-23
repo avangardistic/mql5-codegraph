@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from functools import partial
-from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 import json
 import mimetypes
 from pathlib import Path
-from threading import BoundedSemaphore
+import socket
+from threading import BoundedSemaphore, Timer
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 import webbrowser
@@ -27,11 +28,13 @@ class DashboardThreadingHTTPServer(ThreadingHTTPServer):
     request_queue_size = 64
     max_request_threads = 32
     request_read_timeout_seconds = 2.0
+    request_read_deadline_seconds = 10.0
     daemon_threads = True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.max_request_threads = type(self).max_request_threads
         self.request_read_timeout_seconds = type(self).request_read_timeout_seconds
+        self.request_read_deadline_seconds = type(self).request_read_deadline_seconds
         self._request_slots = BoundedSemaphore(self.max_request_threads)
         super().__init__(*args, **kwargs)
 
@@ -63,12 +66,30 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def handle_one_request(self) -> None:
         self.connection.settimeout(self.server.request_read_timeout_seconds)
+        self._request_read_timer = Timer(
+            self.server.request_read_deadline_seconds,
+            self._expire_request_read,
+        )
+        self._request_read_timer.daemon = True
+        self._request_read_timer.start()
         try:
             super().handle_one_request()
+        except (ConnectionError, OSError):
+            self.close_connection = True
         finally:
-            self.connection.settimeout(None)
+            self._finish_request_read()
+
+    def _expire_request_read(self) -> None:
+        try:
+            self.connection.shutdown(socket.SHUT_RD)
+        except OSError:
+            pass
 
     def _finish_request_read(self) -> None:
+        timer = getattr(self, "_request_read_timer", None)
+        if timer is not None:
+            timer.cancel()
+            self._request_read_timer = None
         self.connection.settimeout(None)
 
     def end_headers(self) -> None:
@@ -112,11 +133,45 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         else:
             self._json(500, {"error": {"code": "internal_error", "message": "Unexpected server error"}})
 
+    def _validate_request_origin(self) -> None:
+        host = self.headers.get("Host")
+        if host is None:
+            raise ApiError(400, "host_required", "Host header is required")
+        try:
+            parsed_host = urlparse(f"//{host}")
+            host_port = parsed_host.port
+        except ValueError as error:
+            raise ApiError(400, "invalid_host", "Host header is invalid") from error
+        if not parsed_host.hostname or not _is_loopback_host(parsed_host.hostname):
+            self.close_connection = True
+            raise ApiError(421, "host_not_allowed", "Dashboard requests must target loopback")
+        if host_port is not None and host_port != self.server.server_port:
+            self.close_connection = True
+            raise ApiError(421, "host_not_allowed", "Host port does not match the dashboard")
+
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return
+        try:
+            parsed_origin = urlparse(origin)
+            origin_port = parsed_origin.port or 80
+        except ValueError as error:
+            raise ApiError(403, "origin_not_allowed", "Origin header is invalid") from error
+        if (
+            parsed_origin.scheme != "http"
+            or not parsed_origin.hostname
+            or not _is_loopback_host(parsed_origin.hostname)
+            or origin_port != self.server.server_port
+        ):
+            self.close_connection = True
+            raise ApiError(403, "origin_not_allowed", "Cross-origin dashboard requests are denied")
+
     def do_GET(self) -> None:
         self._finish_request_read()
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query, keep_blank_values=True)
         try:
+            self._validate_request_origin()
             if parsed.path == "/api/health":
                 return self._json(200, self.api.health())
             if parsed.path == "/api/status":
@@ -144,6 +199,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
+            self._validate_request_origin()
             intelligence_prefix = "/api/v1/intelligence/"
             is_intelligence = parsed.path.startswith(intelligence_prefix)
             if parsed.path != "/api/analyze" and not is_intelligence:
@@ -207,10 +263,22 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(payload)
 
 
+def _is_loopback_host(host: str) -> bool:
+    normalized = host.strip().strip("[]").casefold()
+    if normalized == "localhost":
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
 def create_server(
     state: DashboardState, host: str = "127.0.0.1", port: int = 0,
     static_root: str | Path | None = None,
 ) -> ThreadingHTTPServer:
+    if not _is_loopback_host(host):
+        raise ValueError("Dashboard host must be a loopback address")
     root = Path(static_root) if static_root else Path(__file__).resolve().parent.parent / "web_static"
     api = DashboardApi(state)
     handler = partial(DashboardRequestHandler, api=api, static_root=root)
@@ -227,15 +295,12 @@ def serve_dashboard(
     state = DashboardState()
     if graph_path:
         graph = CodeGraph.load(graph_path)
-        graph_root = root or graph.metadata.get("root")
-        if not graph_root:
-            raise ValueError("A repository root is required when the graph has no root metadata")
-        state.load_graph(graph, graph_root)
+        state.load_graph(graph, root)
     if root and not graph_path:
         state.start_analysis(root, include_roots or [])
     server = create_server(state, host, port)
     actual_host, actual_port = server.server_address[:2]
-    display_host = "127.0.0.1" if actual_host in {"0.0.0.0", "::"} else actual_host
+    display_host = f"[{actual_host}]" if ":" in actual_host else actual_host
     url = f"http://{display_host}:{actual_port}/"
     print(f"MQL5 CodeGraph dashboard: {url}")
     if open_browser:

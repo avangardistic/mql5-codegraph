@@ -86,6 +86,17 @@ class DashboardStateTests(TestCase):
         self.assertEqual("second", kernel.graph_identity.source_fingerprint)
         self.assertEqual(revision, kernel.graph_identity.snapshot_revision)
 
+    def test_saved_graph_root_is_optional_and_not_inferred(self) -> None:
+        state = DashboardState()
+        graph = CodeGraph({"root": "D:/untrusted/metadata"})
+
+        state.load_graph(graph)
+
+        loaded, _, root, revision = state.intelligence_snapshot()
+        self.assertIs(graph, loaded)
+        self.assertIsNone(root)
+        self.assertEqual(1, revision)
+
     def test_failed_reload_retains_matching_graph_and_kernel_pair(self) -> None:
         calls = 0
 

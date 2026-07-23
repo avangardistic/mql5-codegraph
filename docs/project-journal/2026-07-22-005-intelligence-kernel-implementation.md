@@ -1,0 +1,1658 @@
+# 005 — Intelligence Kernel implementation and US1 MVP
+
+**Date**: 2026-07-22
+**Scope**: Spec 003 planning gate through the US1 MVP
+**Implementation status**: T001–T029 complete; US1 checkpoint passed; US2 kernel path dispatch green
+
+## Verified outcomes
+
+- Generated `specs/003-intelligence-kernel/tasks.md` with 48 dependency-ordered, test-first tasks.
+- Checklist validation found 48 valid task lines, continuous IDs `T001` through `T048`, no duplicates,
+  and explicit references to all `FR-001` through `FR-016` and `SC-001` through `SC-007`.
+- Spec Kit prerequisite check resolved the active feature directory and confirmed that research, data model,
+  contracts, quickstart, and tasks artifacts are available.
+- Spec Kit Analyze was run read-only. It found no constitution-breaking critical issue, but implementation
+  remains gated on resolving dependency and verification gaps described below.
+- No production source file was modified and no implementation task was started.
+
+## Analyze findings
+
+1. US2 and US3 are described as depending only on the foundation, but their CLI/API/server tasks reuse
+   adapter entry points introduced by US1. The dependency graph must either require US1 or add independent
+   adapter-shell foundation tasks.
+2. FR-008 is path-specific, but T027/T028 describe its behavior without referencing FR-008 while T034
+   incorrectly associates FR-008 with context packaging.
+3. Required stale, unavailable, locationless, and unknown evidence-state vectors are not named explicitly
+   in an executable task.
+4. Query and diagnostics item-bound completion/truncation behavior is not explicitly tested even though
+   the normalized contract bounds those operations.
+5. The conformance migration gate requires a reference-fixture end-to-end run; T046 names regression and
+   compile checks but not that gate explicitly.
+6. `tests/test_web_state.py` is required by T017 but absent from the planned source tree.
+7. T026's phrase “intentionally unsupported evidence categories” conflicts with the normative evidence
+   categories and should instead document observed support and explicit evidence state.
+
+## Verification evidence
+
+```text
+.specify/scripts/powershell/check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks
+=> FEATURE_DIR=C:\work\mql5-codegraph\specs\003-intelligence-kernel
+=> AVAILABLE_DOCS includes research.md, data-model.md, contracts/, quickstart.md, tasks.md
+
+Task checklist audit
+=> TaskCount=48
+=> InvalidFormat=0
+=> MissingIds=<none>
+=> DuplicateIds=<none>
+=> MissingFR=<none>
+=> MissingSC=<none>
+```
+
+## Risks and decisions
+
+- Trace-token coverage is complete, but semantic coverage is not yet sufficient to begin safely.
+- Generated `graphify-out/` artifacts remain local project intelligence and must not be staged or committed.
+- Legacy compatibility fixtures must capture human output, JSON, stderr, exit codes, HTTP shapes, and statuses;
+  JSON payload snapshots alone are not a sufficient interpretation of T003.
+
+## Next objective
+
+Review and remediate the seven Analyze findings in `specs/003-intelligence-kernel/tasks.md` and
+`specs/003-intelligence-kernel/plan.md`, rerun Analyze, and begin implementation only when no HIGH gap remains.
+
+## Analyze rerun
+
+The seven original findings were remediated and the second read-only Analyze pass found no CRITICAL or
+HIGH issue. The implementation gate is open. Remaining non-blocking cleanup:
+
+- Remove surplus FR-008 references from matching/context tasks; the authoritative FR-008 behavior is now
+  explicitly covered by T027 and T028.
+- Make empty-graph and missing-optional-metadata operation tests explicit rather than relying on general
+  negative/conformance wording.
+- Optionally add test helper and compatibility-fixture paths to the illustrative project tree and remove
+  the stale comment that `tasks.md` is generated in a future phase.
+
+**Next executable objective**: Begin Phase 1 at T001, then complete the blocking Phase 2 test-first before US1.
+
+## Final pre-implementation handoff
+
+The two remaining MEDIUM findings were remediated:
+
+- FR-008 traceability now belongs to the completion model and the path-specific T027/T028 work; matching
+  and context-package tasks no longer claim path-only semantics.
+- T016 now explicitly exercises empty graphs and graphs with missing optional metadata across normalized
+  direct, CLI, and HTTP conformance surfaces.
+
+The final read-only Spec Kit Analyze pass reports:
+
+- **CRITICAL**: 0
+- **HIGH**: 0
+- **MEDIUM**: 0
+- **Requirement coverage**: 23/23 (`FR-001..FR-016`, `SC-001..SC-007`)
+- **Tasks**: 48 total, IDs `T001..T048`, 48 valid checklist entries, 19 marked parallel
+- **User-story tasks**: US1 12, US2 7, US3 7
+- **Constitution issues**: none
+- **Unmapped implementation tasks**: none
+
+Two non-blocking LOW documentation notes remain intentionally deferred: the project-tree comment still says
+`tasks.md` is generated by the next phase, and the illustrative test tree omits helper/contract-fixture paths.
+Neither changes dependency order, runtime scope, acceptance behavior, or the implementation gate.
+
+### Resume instructions for the next session
+
+1. Read this entry, `specs/003-intelligence-kernel/tasks.md`, and the normative contracts.
+2. Confirm the working tree before editing; Feature 003 planning documents are intentionally uncommitted.
+3. Start with T001, T002, and T003. They are parallel-safe and must not change runtime behavior.
+4. Continue through Phase 2 test-first. Do not begin US1 until the foundational checkpoint passes.
+5. Before editing any existing function/class/method, follow the repository GitNexus impact-analysis rule.
+6. Do not stage or commit generated `graphify-out/` artifacts.
+
+**Exact next task**: T001 — create the Intelligence package boundary in
+`src/mql5_codegraph/intelligence/__init__.py`.
+
+## Implementation continuation — Phase 1 and Phase 2
+
+### Verified outcomes
+
+- Completed and marked T001–T014 in `specs/003-intelligence-kernel/tasks.md`.
+- Added the backend-neutral `mql5_codegraph.intelligence` package with immutable v1 request/result,
+  evidence, completion, context, path, identity, and error contracts.
+- Added an immutable `GraphIndex` with deterministically sorted lookup and adjacency tables; tests prove
+  insertion-order independence and unchanged canonical graph serialization.
+- Added exact-ID, qualified-name, short-name, substring, kind-filter, ambiguity, and no-match resolution
+  with deterministic equal-rank ordering.
+- Added the version-negotiating `IntelligenceKernel` shell with snapshot identity, request normalization,
+  fingerprint mismatch detection, graph-schema validation, and stable dispatch errors.
+- Captured legacy CLI human/JSON/stdout/stderr/exit behavior and HTTP payload/status/content-type behavior
+  as immutable JSON fixtures with byte-level SHA-256 checks.
+- No legacy runtime adapter behavior was changed; only compatibility tests were added to existing CLI/Web tests.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_models tests.intelligence.test_matching tests.test_cli tests.test_web_api
+=> Ran 20 tests in 1.267s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 30 tests in 1.393s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> 14 code files re-extracted; 105 unchanged; 0 deleted
+=> 692 nodes, 1128 directed edges, 51 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Risks and decisions
+
+- The GitNexus service did not contain an index for this repository, so pre-change impact lookup for the
+  legacy test classes could not run there. The existing directed Graphify graph was queried instead and
+  confirmed those tests exercise `run`, `DashboardApi`, `DashboardState`, and the HTTP server boundary.
+- Incremental Graphify semantic extraction could not use an API backend, and the host semantic sub-agent
+  did not finish within the session window. The code graph was refreshed with `--code-only`; the three
+  changed Markdown files remain pending semantic re-extraction. Directed graph integrity diagnostics pass.
+- Graphify reported two compatibility fixture JSON files with zero AST nodes. They are contract data rather
+  than executable source; the warning remains visible and was not suppressed.
+- The kernel intentionally has no operation handlers at this checkpoint. Recognized operations return the
+  stable `unsupported_operation` error until US1 implements authoritative query/context/impact/diagnostics.
+- Planning documents, ADRs, journal files, and `graphify-out/` remain uncommitted as requested.
+
+## Next objective
+
+Begin T015–T017 test-first for US1, confirm failures are caused by missing traversal/conformance/snapshot
+behavior, then implement T018 without changing legacy adapter output.
+
+## US1 continuation — authoritative operations and compatible adapters
+
+### Verified outcomes
+
+- Completed and marked T015–T026.
+- Added deterministic bounded context and upstream-impact traversal with explicit direction, relationship
+  filters, cycle safety, evidence origin/state, and truthful `max_depth`/`max_items` completion.
+- Implemented normalized query, context, impact, and diagnostic dispatch on one immutable kernel snapshot.
+- Added the `intelligence query|context|impact|diagnostics --contract-version 1 --json` CLI namespace and
+  corresponding `POST /api/v1/intelligence/*` HTTP routes.
+- `DashboardState` now publishes `CodeGraph` and `IntelligenceKernel` together under one revision; failed
+  reloads retain the previous matching pair.
+- Legacy `CodeGraph`, CLI, and unversioned HTTP intelligence behavior delegates through the kernel/index
+  compatibility layer. Golden byte hashes, payloads, status codes, stderr, and exit codes remain unchanged.
+- Direct, CLI v1, and HTTP v1 results conform for all four US1 operations after removing HTTP-only revision.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_traversal tests.intelligence.test_conformance tests.test_cli tests.test_web_api tests.test_web_state
+=> Ran 24 tests in 2.896s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 43 tests in 2.990s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> final incremental pass: 3 code files re-extracted; 118 unchanged; 0 deleted
+=> 760 nodes, 1251 directed edges, 56 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Evidence limitations
+
+- A supplied read-only evidence probe supports explicit `stale`, `unavailable`, and `unknown` states.
+- CLI and HTTP do not yet configure a filesystem probe. Located evidence reports
+  `unknown/probe_not_configured`; locationless evidence reports `unknown/location_missing`.
+- Stored source locations are not treated as proof of availability or freshness.
+- Graphify skipped four changed Markdown files during the code-only incremental refresh; semantic document
+  re-extraction remains pending. The directed code graph and its integrity diagnostics are current.
+
+## Next objective
+
+Begin US2 at T027 with failing directed-path evidence and completion vectors, then implement the
+evidence-first bounded path search in T028.
+
+## US2 continuation — directed-path red tests
+
+### Verified outcomes
+
+- Completed and marked T027 without adding production path-search behavior.
+- Added directed-path vectors for forward and reverse traversal, relationship filters, all four origin
+  categories, confidence, source locations, locationless evidence, and available/stale/unavailable/unknown
+  evidence states.
+- Added cycle safety, unresolved external target visibility, evidence-first versus shortest-path ranking,
+  confidence and lexical edge-ID tie-breaking, insertion-order independence, and capped-path output checks.
+- Locked completion semantics so exhaustive disconnection reports `not_connected`, while depth- or
+  expansion-bounded searches remain incomplete and never imply disconnection.
+
+### Verification evidence
+
+```text
+python -m compileall -q tests/intelligence/test_paths.py
+=> exit 0, no output
+
+python -m unittest tests.intelligence.test_paths
+=> Ran 1 test in 0.000s
+=> FAILED (errors=1)
+=> ModuleNotFoundError: No module named 'mql5_codegraph.intelligence.paths'
+
+python -m unittest tests.intelligence.test_models tests.intelligence.test_matching tests.intelligence.test_traversal tests.intelligence.test_conformance tests.test_cli tests.test_web_api tests.test_web_state
+=> Ran 36 tests in 2.929s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> 1 code file re-extracted; 121 unchanged; 0 deleted
+=> 774 nodes, 1266 directed edges, 53 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+The focused suite is intentionally red. Its failure is the missing T028 production module, not a syntax,
+fixture, or collection failure in the new test file.
+
+### Risks and decisions
+
+- The test-facing pure operation is named `find_directed_paths(index, source_id, target_id, bounds, ...)`
+  and returns immutable `paths` plus `completion`; T028 must satisfy this boundary before kernel dispatch.
+- `max_paths` is treated as an output cap: if eligible search is otherwise exhausted, completion remains
+  complete but truncated and reports the exact omitted path count.
+- Graphify output remains generated and uncommitted. Source and specification are authoritative for T028.
+- The code-only Graphify refresh skipped four changed Markdown files, so their semantic extraction remains
+  pending; the directed code graph and integrity diagnostics are current.
+
+## Next objective
+
+Implement T028 in `src/mql5_codegraph/intelligence/paths.py` so the new directed-path suite passes without
+adding kernel, CLI, or HTTP path dispatch from T029–T032.
+
+## US2 continuation — evidence-first path search
+
+### Verified outcomes
+
+- Completed and marked T028 without adding kernel, CLI, HTTP, or server path dispatch.
+- Implemented immutable pure path-search results over `GraphIndex` using a deterministic priority queue
+  and simple-path cycle prevention.
+- Implemented `evidence_first_v1` ordering: inferred or ambiguous hop count, stale or unavailable evidence
+  count, hop count, origin penalty, descending minimum confidence basis points, then lexical edge-ID sequence.
+- Preserved forward/reverse direction, relationship type, origin, confidence, source location, and explicit
+  evidence state on every hop; an optional probe is evaluated once per edge per operation.
+- Separated search limits from output limits: exhaustive disconnection reports `not_connected`,
+  depth/expansion bounds report incomplete search, and an exact `max_paths` cap reports complete but truncated
+  output with an omitted count.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_paths
+=> Ran 12 tests in 0.003s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 55 tests in 2.927s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> T028 final pass: 1 code file re-extracted; 122 unchanged; 0 deleted
+=> 790 nodes, 1295 directed edges, 54 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Risks and decisions
+
+- T028 exposes only `find_directed_paths` and `PathSearchResult` from the internal `paths` module. Public
+  versioned dispatch and envelope serialization remain intentionally deferred to T029.
+- Search work counts eligible edge transitions, including cycle edges that are examined and rejected.
+  `max_expansions` therefore bounds actual transition work rather than only successfully enqueued states.
+- Exact omitted path counts are computed only when eligible bounded search completes; incomplete search
+  reports `{"paths": null}`.
+- The final code-only Graphify refresh skipped five changed Markdown files. Their semantic refresh remains
+  pending, while the directed code graph and integrity diagnostics are current.
+
+## Next objective
+
+Implement T029 by resolving two path selectors in `IntelligenceKernel`, dispatching to
+`find_directed_paths`, and projecting the result into the normalized v1 envelope without starting CLI or
+HTTP path work from T030–T032.
+
+## US2 continuation — versioned kernel path dispatch
+
+### Verified outcomes
+
+- Completed and marked T029 without adding CLI, HTTP, or server path support.
+- Added `_execute_path` to `IntelligenceKernel`; path requests now require exactly two selectors, retain
+  both `TargetResolution` records, and return stable `missing_target` or successful `no_match` semantics.
+- Ambiguous source or target selectors are not collapsed to one candidate. The pure path engine now searches
+  every resolved source/target alternative under one shared depth, path, and expansion budget.
+- Normalized path results populate the existing v1 `paths`, `resolution`, `limits_applied`, and `completion`
+  fields while preserving empty arrays/null for unrelated envelope sections.
+- Canonical JSON, evidence-probe state, graph identity, deterministic ordering, and source-graph immutability
+  are covered by focused kernel assertions.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_paths tests.intelligence.test_models
+=> Ran 21 tests in 0.004s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 58 tests in 3.075s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> T029 final pass: 4 code files re-extracted; 119 unchanged; 0 deleted
+=> 803 nodes, 1330 directed edges, 55 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Risks and decisions
+
+- `find_directed_paths_between` is an internal integration helper. `find_directed_paths` keeps its original
+  single-source/single-target API and behavior.
+- The path operation's documented default direction remains an adapter concern for T030/T031; direct typed
+  requests specify direction explicitly so an intentional `both` request is not rewritten by the kernel.
+- `context_package` remains the only recognized operation without a kernel handler and continues to exercise
+  the stable `unsupported_operation` contract until T036.
+- The final code-only Graphify refresh skipped six changed Markdown files. Their semantic refresh remains
+  pending, while the directed code graph and integrity diagnostics are current.
+
+## Next objective
+
+Implement T030 in `src/mql5_codegraph/cli.py`: add normalized v1 path arguments, outgoing defaults,
+validation, stable errors, and JSON projection without changing any legacy command output. T031 remains
+parallel-safe follow-up work for HTTP.
+
+## US2 continuation — normalized CLI path adapter
+
+### Verified outcomes
+
+- Completed and marked T030 without adding HTTP or server path behavior.
+- Added `intelligence path GRAPH SOURCE TARGET` with the documented outgoing direction, depth five,
+  three-path, and 10,000-expansion defaults.
+- Added explicit direction, relationship type, depth, path-count, expansion, contract-version, and JSON
+  arguments while retaining deterministic relationship-type normalization.
+- Projected successful results through the canonical v1 envelope and validation failures through the existing
+  stable error envelope on stderr with exit code 1.
+- Preserved every frozen legacy CLI byte, stderr value, and exit code.
+
+### Verification evidence
+
+```text
+python -m unittest tests.test_cli
+=> Ran 5 tests in 0.212s
+=> OK
+
+python -m unittest tests.intelligence.test_paths
+=> Ran 15 tests in 0.006s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 61 tests in 2.951s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> 2 code files re-extracted; 121 unchanged; 0 deleted
+=> 806 nodes, 1339 directed edges, 63 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Risks and decisions
+
+- Path keeps the contract-wide `max_items=30` and `context_units=100` values inside its normalized request
+  even though those bounds do not constrain path enumeration; the path-specific CLI exposes only depth,
+  path-count, and expansion bounds.
+- `max_depth=0` remains valid by the accepted data model and schema, where it searches no hops. Invalid depth
+  coverage therefore uses values below zero and above five.
+- Argparse syntax/type errors retain argparse exit code 2. Parsed contract and bound validation use the
+  normalized error envelope, consistent with the existing intelligence namespace.
+- The final code-only Graphify refresh skipped seven changed documentation files. The directed code graph
+  and integrity diagnostics are current; semantic documentation extraction remains pending.
+
+## Next objective
+
+Implement T031 in `src/mql5_codegraph/web/api.py`: add normalized v1 HTTP path projection, validation,
+stable errors, and direct/CLI/HTTP semantic equivalence without registering the route until T032.
+
+## US2 continuation — normalized HTTP path projector
+
+### Verified outcomes
+
+- Completed and marked T031 without changing server routing.
+- Added HTTP-side path normalization before kernel dispatch so omitted path options use the v1 defaults:
+  outgoing direction, depth five, 30 general items, three paths, 10,000 expansions, and 100 context units.
+- Preserved caller-supplied path direction and bound overrides while leaving semantic execution, evidence,
+  completion, and deterministic ordering inside `IntelligenceKernel`.
+- Rejected a non-object `bounds` value as stable `invalid_parameter` with field `bounds`; unsupported contract
+  versions, invalid nested bounds, and route/body operation mismatches retain their established error codes.
+- Added projector tests for runtime-origin path evidence, confidence, source location, defaults, unsupported
+  versions, invalid path counts, malformed bounds, and mismatched operations.
+
+### Verification evidence
+
+```text
+python -m unittest tests.test_web_api.DashboardApiTests.test_normalized_path_projects_defaults_and_evidence tests.test_web_api.DashboardApiTests.test_normalized_path_preserves_stable_validation_errors
+=> Ran 2 tests in 0.024s
+=> OK
+
+python -m unittest tests.test_web_api tests.intelligence.test_conformance tests.intelligence.test_paths
+=> Ran 29 tests in 2.816s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 63 tests in 3.297s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> 2 code files re-extracted; 121 unchanged; 0 deleted
+=> 811 nodes, 1350 directed edges, 62 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Risks and decisions
+
+- Path defaults are normalized only by the HTTP adapter; the typed kernel continues to honor explicit request
+  values and remains transport-neutral.
+- The generic server operation map already contains `path` from the earlier normalized-route infrastructure.
+  T032 should verify the concrete POST route, status mapping, content type, and frozen legacy routes before
+  deciding whether any additional registration code is necessary.
+- T031 tests exercise `DashboardApi` directly so route registration remains the explicit T032 verification
+  boundary.
+- The final code-only Graphify refresh skipped eight changed documentation files. The directed code graph
+  and integrity diagnostics are current; semantic documentation extraction remains pending.
+
+## Next objective
+
+Complete T032 by verifying and, only if needed, registering `POST /api/v1/intelligence/path` in
+`src/mql5_codegraph/web/server.py`; cover success and stable HTTP status/error mapping without altering any
+legacy route behavior.
+
+## US2 continuation — normalized HTTP path route verification
+
+### Verified outcomes
+
+- Completed and marked T032 without changing `src/mql5_codegraph/web/server.py`; the generic operation map
+  added by T024 already registers `path`.
+- Added a real HTTP-server regression test for `POST /api/v1/intelligence/path`, including a successful
+  `OnTick` to `CalculateLots` request through the analyzed reference fixture.
+- Locked the normalized transport mapping for request, compatibility, state, integrity, and unexpected
+  failures at HTTP 400, 409, 422, and 500 while preserving each normalized Intelligence error code.
+- Verified every success and error response uses `application/json; charset=utf-8`.
+- Re-ran the frozen unversioned HTTP golden; status, content type, body hash, and decoded JSON remain exact.
+
+### Verification evidence
+
+```text
+python -m unittest tests.test_web_api.DashboardHttpTests.test_normalized_path_route_status_mapping_and_content_type tests.test_web_api.DashboardHttpTests.test_legacy_http_contract_golden_bytes
+=> Ran 2 tests in 1.102s
+=> OK
+
+python -m unittest tests.test_web_api tests.intelligence.test_conformance tests.intelligence.test_paths
+=> Ran 30 tests in 3.419s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 64 tests in 3.612s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+```
+
+### Risks and decisions
+
+- Common path failures are produced by real request payloads. Error conditions that cannot be constructed
+  through a valid published `DashboardState` are injected at the API boundary only to lock server mapping.
+- An unknown normalized Intelligence error intentionally maps to HTTP 500 while preserving its code; a
+  non-Intelligence exception maps to the historical safe `internal_error` envelope.
+- The existing operation map is sufficient. Adding duplicate or path-specific registration code would
+  increase adapter branching without changing behavior.
+- Planning documents, task markers, journal records, and generated Graphify output remain uncommitted.
+
+## Next objective
+
+Complete T033 by adding one executable reference-fixture acceptance assertion in
+`tests/intelligence/test_paths.py` for the known `OnTick` to `CalculateLots` path, while retaining the
+existing disconnected, cyclic, equal-alternative, and bounded-incomplete vectors as the rest of the US2 slice.
+
+## US2 checkpoint — independent directed-path acceptance
+
+### Verified outcomes
+
+- Completed and marked T033 with an executable acceptance assertion over the analyzed `basic_ea` fixture.
+- The known outgoing `OnTick` to `CalculateLots` route completes exhaustively with one
+  `evidence_first_v1` alternative.
+- Every returned hop is asserted to retain forward direction, relationship type, allowed evidence origin,
+  bounded confidence, source location, and an explicit available evidence state.
+- The acceptance assertion also proves the canonical graph remains byte-identical before and after the
+  kernel request.
+- The complete path suite retains separate executable vectors for disconnected graphs, cycles,
+  equal-ranked alternatives, output caps, depth exhaustion, expansion exhaustion, reverse direction,
+  unresolved targets, and evidence freshness.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_paths.DirectedPathTests.test_us2_acceptance_slice_on_reference_fixture
+=> Ran 1 test in 0.004s
+=> OK
+
+python -m unittest tests.intelligence.test_paths
+=> Ran 16 tests in 0.016s
+=> OK
+
+python -m unittest tests.intelligence.test_paths tests.test_web_api
+=> Ran 25 tests in 1.793s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 65 tests in 3.525s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> 2 code files re-extracted; 121 unchanged; 0 deleted
+=> 813 nodes, 1312 directed edges, 70 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Risks and decisions
+
+- The acceptance kernel receives an explicit read-only evidence probe so the fixture's present source
+  locations are asserted as available. CLI and HTTP continue to report unknown freshness until a protected
+  adapter probe is configured.
+- The reference fixture currently yields one resolved hop. Synthetic path tests remain authoritative for
+  runtime, inferred, stale, unavailable, locationless, cyclic, and multi-alternative cases.
+- The code-only Graphify refresh skipped ten changed documentation files. Directed code relationships and
+  graph integrity are current; semantic documentation extraction remains pending for the final T048 refresh.
+- No legacy CLI or HTTP contract was changed. All specification and journal updates remain uncommitted.
+
+## Next objective
+
+Begin T034 test-first by adding failing deterministic context-package, atomic packing, ambiguity,
+evidence-state, omission, tiny-budget, and cross-surface conformance vectors without implementing T035.
+
+## US3 checkpoint — deterministic bounded context packages
+
+### Verified outcomes
+
+- Completed and marked T034–T040.
+- The T034 suite first failed only because `mql5_codegraph.intelligence.context` did not exist.
+- Added a pure context selector with the documented tier order: target alternatives, direct evidence,
+  local diagnostics, second-order evidence, and remaining diagnostics; ties use distance, origin penalty,
+  descending confidence basis points, and stable IDs.
+- Structural packing charges one `structural_record_v1` unit per item and admits relationships only
+  atomically with both endpoint summaries.
+- Ambiguous targets remain visible, tiny budgets never emit partial groups, and omissions are sorted and
+  counted by node, relationship, diagnostic, and ambiguity-alternative category.
+- Evidence keeps locationless, stale, unavailable, and unknown states explicit. A locationless edge cannot
+  be promoted to available even when a probe is configured.
+- Added kernel dispatch plus normalized CLI and HTTP context-package adapters. The existing T024 operation
+  map already registered `context-package`, so T039 required no new server branch.
+- The US3 acceptance vector repeats a budget-four request twice through direct Python, CLI, and real HTTP,
+  proving identical ordering, closure, budget use, omissions, and canonical envelopes.
+- Frozen legacy CLI and HTTP golden assertions remain exact.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_context
+=> initial T034 run: ModuleNotFoundError for mql5_codegraph.intelligence.context
+
+python -m unittest tests.intelligence.test_context
+=> Ran 7 tests in 0.558s
+=> OK
+
+python -m unittest tests.intelligence.test_context tests.test_cli tests.test_web_api tests.intelligence.test_conformance
+=> Ran 27 tests in 4.119s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 72 tests in 4.267s
+=> OK
+
+python -m compileall -q src tests
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+graphify . --update --directed --code-only
+=> 6 code files re-extracted; 119 unchanged; 0 deleted
+=> 840 nodes, 1379 directed edges, 64 communities
+
+graphify diagnose multigraph --graph graphify-out/graph.json --directed --json
+=> missing endpoints=0; dangling endpoints=0; self loops=0
+=> exact duplicates=0; directed collapsed edges=0
+```
+
+### Risks and decisions
+
+- Context diagnostics currently report unknown freshness because the evidence probe protocol accepts graph
+  edges only. Their source locations remain present and are never treated as availability proof.
+- Explicit `max_depth` or `max_expansions` exhaustion takes precedence over context-budget completion,
+  matching the contract rule that the first deterministic bound preventing completion owns the reason.
+- The code-only Graphify refresh skipped eleven changed documentation files. Semantic documentation
+  extraction remains pending for T048.
+- All source, tests, task markers, and documentation remain uncommitted.
+
+## Next objective
+
+Implement T041 by adding 100-repeat and randomized insertion-order canonical determinism checks for all six
+normalized operations, then build the reusable benchmark harness required by T042 and T043.
+
+## Cross-cutting checkpoint — determinism and benchmark harness
+
+### Verified outcomes
+
+- Completed and marked T041–T043.
+- Every normalized operation (`query`, `context`, `impact`, `diagnostics`, `path`, and `context_package`)
+  produces byte-identical canonical JSON across 100 independently shuffled node, edge, and diagnostic
+  insertion orders.
+- Each determinism iteration also proves the canonical graph serialization remains unchanged.
+- Added a fixed-seed benchmark generator with four disconnected cyclic components, exact four-edge fanout,
+  ambiguous names, extracted/resolved/runtime/inferred origins, diagnostics, and known short paths.
+- The opt-in profile builds 10,000 nodes and 40,000 edges, performs 20 warmups, runs 200 balanced query,
+  context, path, and context-package requests, validates every response, and emits machine-readable JSON.
+- The report includes environment, graph size, index construction nanoseconds, per-operation and overall
+  nearest-rank p50/p95/max, the one-second threshold, and graph immutability.
+- Default execution does not run the scale benchmark. The reduced CI smoke uses the same generator and
+  validators with 200 nodes/800 edges and does not assert any wall-clock threshold.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_conformance.IntelligenceConformanceTests.test_all_normalized_operations_are_stable_over_100_randomized_builds tests.intelligence.test_conformance.IntelligenceConformanceTests.test_reduced_benchmark_validates_without_enforcing_wall_clock
+=> Ran 2 tests in 0.211s
+=> OK
+
+python tools/benchmark_intelligence.py
+=> {"enabled": false, "message": "Set MQL5_CODEGRAPH_PERF=1 to run the 10k benchmark", "schema_version": 1}
+
+python -m unittest tests.intelligence.test_conformance
+=> Ran 8 tests in 1.851s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 74 tests in 4.384s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+```
+
+### Risks and decisions
+
+- Timing is intentionally enforced only when `MQL5_CODEGRAPH_PERF=1`; ordinary CI proves construction,
+  operation mix, response validity, atomic packing, and graph immutability without flaky performance gates.
+- The full 10k benchmark has not yet been interpreted or recorded; that remains T047.
+- Benchmark source and reports contain no environment secrets. The report records only runtime and machine
+  characteristics required by the performance protocol.
+
+## Next objective
+
+Complete T044 and T045 by documenting the authoritative boundary, adapter/version/evidence matrix,
+exporter exception, and current static-analysis/non-runtime limitations before the final E2E gates.
+
+## Documentation checkpoint — authoritative boundary and limitations
+
+### Verified outcomes
+
+- Completed and marked T044–T045.
+- README now introduces normalized query, path, and context-package entry points and distinguishes the
+  versioned Intelligence contract from frozen legacy surfaces.
+- Architecture documentation defines the canonical graph, immutable index, authoritative kernel, atomic
+  dashboard snapshot, adapter matrix, independent versioning policy, evidence taxonomy, freshness states,
+  structural context accounting, and representation-only exporter exception.
+- Limitations now state that stored locations are not freshness proof, runtime edges are not execution
+  traces, inferred edges remain hypotheses, bounded-incomplete path search is not disconnection, ambiguity
+  is preserved, and structural units are not model tokens.
+- The stable MCP surface remains explicitly deferred; future adapters must retain the same version,
+  evidence, ambiguity, and completion semantics.
+
+### Verification evidence
+
+```text
+rg -n "Authoritative intelligence boundary|Adapter and compatibility matrix|Evidence and uncertainty|Structural context packages|Evidence and runtime guarantees|Context and performance limits" README.md docs/architecture.md docs/limitations.md
+=> all required architecture and limitation sections found
+
+git diff --check
+=> exit 0, no output
+```
+
+### Risks and decisions
+
+- Documentation describes only implemented behavior and observed evidence states; it does not claim runtime
+  execution certainty or universal performance.
+- These documentation changes remain uncommitted as requested.
+
+## Next objective
+
+Run T046's reference-fixture end-to-end flow and strongest regression gates, then run and interpret the
+opt-in 10k benchmark for T047 before the final directed Graphify/documentation refresh in T048.
+
+## Release gates — reference E2E and 10k benchmark
+
+### Verified outcomes
+
+- Completed T046's reference-fixture flow: analyzed three files into 16 nodes, 22 edges, and five
+  diagnostics; legacy query/context/impact retained their historical shapes; normalized query, path, and
+  context package declared contract `1.0.0`.
+- The reference `OnTick` to `CalculateLots` path returned one resolved source-evidenced hop.
+- The reference context package used 22 of 40 structural units and disclosed that depth two bounded the
+  remaining search space.
+- All intelligence, CLI, HTTP, dashboard state, indexer, lexer, parser, exporter, full regression,
+  compileall, frontend lint, and production build gates passed.
+- Completed T047's opt-in benchmark on the documented machine with 10,000 nodes, exactly 40,000 edges,
+  100 diagnostics, 20 warmups, and 200 validated timed requests.
+- Overall p95 was 14.266 ms against the 1,000 ms threshold; all operations passed, all responses validated,
+  and the canonical graph hash remained unchanged.
+- The generated reference graph under `.tmp` was removed after its absolute path was verified inside the
+  workspace.
+
+### Verification evidence
+
+```text
+Machine
+=> Windows-11-10.0.26100-SP0; AMD64
+=> Intel64 Family 6 Model 85 Stepping 4, GenuineIntel
+=> 12 logical CPUs
+=> CPython 3.14.3
+=> power profile: Windows desktop; active profile not queried
+
+$env:MQL5_CODEGRAPH_PERF='1'
+$env:MQL5_CODEGRAPH_POWER_PROFILE='Windows desktop; active profile not queried'
+python tools/benchmark_intelligence.py
+
+Graph/index
+=> seed=20260723
+=> nodes=10000; edges=40000; diagnostics=100
+=> index_build_ns=94241400
+=> warmups=20; timed requests=200
+
+query
+=> count=50; p50=4.52615 ms; p95=9.5764 ms; max=15.8811 ms
+context
+=> count=50; p50=4.61495 ms; p95=11.5499 ms; max=16.3174 ms
+path
+=> count=50; p50=9.23015 ms; p95=20.9971 ms; max=26.5168 ms
+context_package
+=> count=50; p50=5.3693 ms; p95=13.2892 ms; max=16.5192 ms
+overall
+=> count=200; p50=5.3402 ms; p95=14.266 ms; max=26.5168 ms
+=> threshold=1000 ms; PASS
+=> validated responses=200; graph unchanged=true
+
+python -m unittest tests.intelligence.test_models tests.intelligence.test_matching tests.intelligence.test_traversal tests.intelligence.test_paths tests.intelligence.test_context tests.intelligence.test_conformance
+=> Ran 48 tests in 2.395s
+=> OK
+
+python -m unittest tests.test_cli tests.test_web_api tests.test_web_state tests.test_indexer tests.test_lexer tests.test_parser
+=> Ran 26 tests in 2.050s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 74 tests in 4.402s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+web/npm run lint
+=> exit 0, no warnings
+
+web/npm run build
+=> exit 0; Vite production build completed
+```
+
+### Risks and decisions
+
+- The benchmark machine's active Windows power profile was not queried; this is recorded rather than
+  guessed. The observed result is evidence for this run, not a universal latency guarantee.
+- `python -m unittest discover -s tests/intelligence` is intentionally not used as a release command because
+  it imports package-relative tests as top-level modules. Root discovery and explicit package-qualified
+  intelligence modules are authoritative.
+- T048 remains responsible for the final full semantic Graphify refresh and project-journal index update.
+
+## T048 — final Graphify refresh and completion audit
+
+- Ran a directed incremental Graphify update over the final code and documentation slice. The first pass
+  replaced changed-source records and produced 844 nodes, 1,388 directed edges, 10 hyperedges, and
+  66 communities.
+- The graph diff reported 30 new and 26 removed nodes plus 639 new and 630 removed edges. Net graph growth
+  was four nodes and nine edges; the larger replacement counts reflect deterministic re-extraction of the
+  changed conformance test, benchmark, architecture, limitations, quickstart, task, and journal sources.
+- Affected concepts include the version-negotiating `IntelligenceKernel` shell, deterministic symbol
+  resolution, deterministic bounded context packages, legacy adapter compatibility, the opt-in benchmark,
+  the release verification gate, and the Graphify refresh itself.
+- Graph health passed with 844 verified nodes and 1,388 valid candidate edges: zero missing endpoints,
+  dangling endpoints, self-loops, exact duplicates, directed same-endpoint collapses, or undirected
+  same-endpoint collapses. The post-build graph remained a directed `DiGraph`.
+- After this journal, its index, and `tasks.md` were finalized, a closure pass re-extracted those three
+  documents and produced the final 834-node, 1,376-edge graph. The ten-node and twelve-edge reduction was
+  inspected as an intentional replace-on-re-extract result from the more concise closure chunk; no code
+  nodes became unverified. The shrink guard blocked the first write, so `force=True` was used only after
+  confirming zero missing/dangling endpoints, self-loops, duplicates, or collapsed edges.
+- Semantic extraction used the host-agent fallback because neither `GEMINI_API_KEY` nor
+  `GOOGLE_API_KEY` was present. The worker wrote 18 semantic nodes, 20 edges, and two hyperedges. The
+  worker interface did not expose token telemetry, so the generated counters remain zero rather than
+  containing an estimate.
+- Generated `graphify-out/` outputs remain ignored and unstaged.
+
+### Final completion evidence
+
+```text
+Task audit
+=> 48 tasks found; IDs T001–T048 continuous; 48 checked
+=> requirements checklist: 16 items; 16 checked
+
+python -m unittest discover -s tests
+=> Ran 74 tests in 4.519s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+web/npm run lint
+=> exit 0, no warnings
+
+web/npm run build
+=> exit 0; Vite production build completed
+
+Graphify directed incremental update
+=> first pass: 844 nodes; 1,388 edges; 10 hyperedges; 66 communities
+=> closure pass: 834 nodes; 1,376 edges
+=> zero missing/dangling endpoints, self-loops, duplicates, or collapsed edges
+```
+
+### Remaining risks
+
+- The benchmark remains machine-specific evidence, not a universal latency guarantee; the active Windows
+  power profile was not queried.
+- Evidence availability probes report repository-state freshness and availability only. They do not prove
+  runtime execution, semantic correctness, or source recency outside the indexed workspace.
+- Structural context units are deterministic graph records, not model tokenizer units.
+- MCP exposure remains deliberately deferred; the kernel is backend-neutral and currently projected
+  through direct Python, normalized CLI, and normalized HTTP adapters.
+- The implementation, tests, fixtures, and benchmark were committed as `e706566`
+  (`feat(intelligence): add versioned intelligence kernel`). Documentation, Spec Kit artifacts, project
+  governance files, and generated Graphify output remain outside that commit; no documentation or
+  generated Graphify artifact was staged or committed.
+
+## Next objective
+
+Add a focused receiver-aware method-resolution regression for `object.Method()` at a global event handler,
+fix the resolver without collapsing ambiguity evidence, then rerun the DCA-Hedge real-project acceptance
+slice.
+
+## Post-commit real-project validation — DCA-Hedge
+
+- Analyzed `C:\work\Example-MQL5` read-only. The generated graph was written only to ignored
+  workspace scratch path `.tmp/dca-hedge.graph.json`; no DCA-Hedge source or memory file was changed.
+- Analysis completed in about 1,905 ms and produced 57 files, 1,247 nodes, 10,720 edges, and source
+  fingerprint `ddb2662f199bd4efcbe165d1e9e6c6986052e9f9501ec8143330843c29495b4a`.
+- Diagnostics contained 111 `info` records and 36 warnings: four `RESOLVE001` unresolved standard-library
+  includes for `Trade\Trade.mqh`, plus 32 `RESOLVE002` ambiguous call groups. No error-severity analyzer
+  diagnostic was produced.
+- A direct normalized outgoing path from `CMainEngine::OnTick` to
+  `CMainEngine::FinalizeTick` returned a resolved confidence-1.0 `calls` hop at
+  `Core/MainEngine.mqh:243`. Paths to `HandleProtectionDecisionFlow`,
+  `ConsumeStrategy2PanelRequests`, and `CanOpenNewOrders` were also returned.
+- The context package for `CMainEngine::OnTick` deterministically consumed all 25
+  `structural_record_v1` units. Two repeated outputs had identical SHA-256
+  `5ebe22392b41230678c1429ead5ec02d1d3848f1684bb5deaa8c81930ff52a12`; two path outputs also
+  matched exactly. The saved graph SHA-256 stayed
+  `cefce305f7c64c7e56c471f3996548f4fd8981b433fe0aad5b21a0ebf6a218fd`.
+- Contract `2.0.0` correctly exited with status 1 and stable
+  `unsupported_contract_version` / `contract_version` error fields.
+- Real-project validation exposed a resolver limitation: `g_MainEngine.OnTick()` at
+  `DCAHedgeEA.mq5:64` was emitted as a self-call from the global `OnTick` handler instead of a call to
+  `CMainEngine::OnTick`. Outgoing path correctly reported not connected; `direction=both` found only the
+  structural `defines -> includes -> defines` route, not a runtime call route.
+- Ambiguous receiver resolution also creates dense low-confidence call fan-out. For example,
+  `m_hedgeLib.Evaluate(...)` at `Core/MainEngine.mqh:286` reaches the correct stub
+  `CHedgeLib::Evaluate` with confidence 0.65, but the same site participates in an ambiguous `Evaluate`
+  group. Several direct path requests reached `max_expansions=10,000` despite returning valid short paths.
+- The DCA-Hedge instruction that `Trade/HedgeLib.mqh` remains a stub was confirmed directly: its
+  `Evaluate` implementation only calls `action.Reset()`.
+
+## Receiver-aware method resolution upgrade
+
+- Added parser regressions for global, member, local, and parameter receivers and an end-to-end indexer
+  regression where a global `OnTick` calls an identically named `CEngine::OnTick` through an object.
+  Before implementation, the parser test failed because `CallSite` had no `receiver_type`, and the indexer
+  test proved the call edge incorrectly targeted the global handler itself.
+- `CallSite` now carries an internal receiver type inferred from simple C-like bindings. Resolution checks
+  receiver type and arity before same-scope or repository-wide candidates. The canonical graph schema and
+  existing serialized edge attributes did not change.
+- Global `g_MainEngine.OnTick()` now resolves directly to `CMainEngine::OnTick` with confidence 1.0 at
+  `DCAHedgeEA.mq5:64`; the false self-call is gone. Member call
+  `m_hedgeLib.Evaluate(...)` also resolves to `CHedgeLib::Evaluate` with confidence 1.0 instead of
+  participating in the broad `Evaluate` fan-out.
+- Re-analysis used the same DCA-Hedge source fingerprint and completed in about 1,141 ms. The graph changed
+  from 1,247 nodes / 10,720 edges / 147 diagnostics to 1,250 nodes / 6,386 edges / 127 diagnostics.
+  Ambiguous `RESOLVE002` groups fell from 32 to 9; warnings fell from 36 to 13. The three new nodes are
+  explicit external `Reset`, `Destroy`, and `Name` targets for typed receivers whose implementations are
+  outside the analyzed corpus.
+- The 25-unit `CMainEngine::OnTick` context package remained deterministic and immutable while explored
+  edges fell from 8,203 to 3,017 and explored nodes from 295 to 192. Two observed runs completed in
+  approximately 294 ms and 264 ms.
+- Direct outgoing paths to `CMainEngine::OnTick`, `FinalizeTick`, and `CHedgeLib::Evaluate` now carry
+  confidence-1.0 resolved call evidence. The longer path to `CanOpenNewOrders` still reaches
+  `max_expansions=10,000`; path-enumeration efficiency on dense graphs remains a separate follow-up.
+- Committed the code-only fix and regressions as `0de2118`
+  (`fix(resolver): resolve methods by receiver type`). Documentation, specifications, governance files,
+  scratch graphs, and Graphify output remain outside the commit.
+- The directed incremental Graphify pass over the resolver upgrade and journal produced 845 nodes,
+  1,353 edges, and 69 communities. Health diagnostics reported zero missing or dangling endpoints,
+  self-loops, exact duplicates, and directed or undirected same-endpoint collapses.
+
+### Verification evidence
+
+```text
+python -m unittest tests.test_parser tests.test_indexer tests.test_cli tests.test_web_api tests.test_web_state
+=> Ran 26 tests in 2.042s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 76 tests in 4.385s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+DCA-Hedge receiver-aware re-analysis
+=> 57 files; 1,250 nodes; 6,386 edges
+=> 114 info diagnostics; 13 warnings; 9 ambiguous call groups
+=> source fingerprint unchanged
+=> no DCA-Hedge source or memory file changed
+
+Graphify directed incremental update
+=> 845 nodes; 1,353 edges; 69 communities
+=> zero missing/dangling endpoints, self-loops, duplicates, or collapsed edges
+```
+
+## Next objective
+
+Profile bounded path enumeration on the receiver-aware DCA-Hedge graph and reduce unnecessary expansion
+after the requested path quota is satisfied without weakening completion or truncation reporting.
+
+## Target-aware bounded path enumeration upgrade
+
+- Profiled the receiver-aware DCA-Hedge graph with a direct outgoing search from
+  `CMainEngine::OnTick` to `CLicenseGuardLib::CanOpenNewOrders`. At `max_depth=5`,
+  `max_paths=1`, and `max_expansions=10,000`, the previous search returned the valid three-hop path but
+  exhausted all 10,000 edge expansions in about 102 ms.
+- Added an optimistic reverse distance-to-target lower bound. Branches that cannot reach any selected
+  target, or cannot reach one within the remaining depth, are no longer placed on the simple-path
+  frontier. Per-node filtered transitions are cached for the lifetime of the request.
+- Path quota handling now stops only after one additional eligible path proves omission. If unexplored
+  frontier remains, completion is honestly reported as incomplete `max_paths` truncation with
+  `omitted_counts.paths=null`; a fully exhausted small search still reports the exact omitted count.
+- Added regressions for a dense disconnected fan-out and a three-alternative quota slice. The existing
+  exact omission-count, evidence-first ranking, incoming traversal, relationship filter, depth limit,
+  and expansion limit regressions remain green.
+- On the same DCA-Hedge direct request, ten post-change runs had a 2.041 ms median
+  (1.966–2.558 ms), explored 272 edges and six nodes, and produced one stable output SHA-256
+  `222213720966638f7457f0750cc59387bdf203467683dd72a19aebd895c68ac2`. The selected path remained
+  `CMainEngine::OnTick -> CMainEngine::UpdateTradeGates -> CLicenseGuardLib::ApplyTradeGates ->
+  CLicenseGuardLib::CanOpenNewOrders`.
+- The scratch graph SHA-256 remained
+  `4856fc228ef03b4c164481824beabb513a53e43330e1e9a78739ed84f940a33e`; no DCA-Hedge source or memory
+  file was changed.
+- Committed only the implementation and its two regressions as `43659a8`
+  (`fix(intelligence): bound dense path enumeration`). Documentation, specifications, governance files,
+  scratch graphs, and generated Graphify output remain uncommitted.
+- The directed incremental Graphify pass produced 849 nodes, 1,405 edges, and 70 communities. Health
+  diagnostics reported zero missing or dangling endpoints, self-loops, exact duplicates, and directed or
+  undirected same-endpoint collapses.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_paths
+=> Ran 18 tests in 0.008s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 78 tests in 4.474s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+DCA-Hedge bounded path benchmark
+=> previous: about 102 ms; 10,000 explored edges; max_expansions
+=> current: 2.041 ms median across 10 runs; 272 explored edges; max_paths
+=> one output hash across all runs; scratch graph hash unchanged
+
+Graphify directed incremental update
+=> 849 nodes; 1,405 edges; 70 communities
+=> zero missing/dangling endpoints, self-loops, duplicates, or collapsed edges
+```
+
+### Remaining risk
+
+- Reverse target-distance construction is linear in the eligible graph edges for every path request. It
+  removes combinatorial dead-branch growth, but repeated requests to the same target may still benefit
+  from snapshot-scoped caching if profiling proves preprocessing dominates.
+- `omitted_counts.paths=null` is intentionally used when quota truncation stops an otherwise unexhausted
+  frontier; the contract guarantees known omission without pretending the exponential total is known.
+
+## Next objective
+
+Benchmark repeated normalized path requests against one immutable kernel snapshot, then add bounded
+snapshot-scoped target-distance caching only if the preprocessing cost is material and cache invalidation
+can remain explicit at graph replacement.
+
+## Snapshot-scoped target-distance cache upgrade
+
+- Profiled 500 normalized direct path requests against one immutable DCA-Hedge kernel snapshot. Before
+  caching, median kernel execution was 3.0862 ms and p95 was 8.3115 ms. Reverse target-distance
+  preprocessing alone had a 1.5953 ms median and 4.3808 ms p95, accounting for about 51.7% of median
+  request time, so snapshot-scoped reuse was justified.
+- Added a thread-safe 64-entry LRU `TargetDistanceCache` keyed by the sorted target set, traversal
+  direction, and relationship filter. The cache retains only optimistic distance lower bounds and remains
+  attached to one immutable `GraphIndex`; using it with another index is rejected.
+- `IntelligenceKernel` owns the cache. `DashboardState` already publishes a newly constructed kernel for
+  every graph revision, so graph replacement also replaces the cache atomically without a separate
+  invalidation protocol. Direct path helpers remain stateless unless a kernel-owned cache is explicitly
+  supplied internally.
+- Added regressions proving repeated requests reuse one distance build, a new kernel revision starts with
+  a fresh cache, the LRU is bounded and evicts its oldest key, and direction/relationship variants do not
+  alias one another.
+- The post-change DCA-Hedge run built target distances once, then served 500 cache-hit requests at a
+  1.4440 ms median and 4.3892 ms p95, a 53.2% median reduction from the uncached baseline. Cold and cached
+  normalized responses were identical.
+- A separate 100-run check using the same snapshot revision as the uncached baseline produced one output
+  SHA-256, `9748f3d0ac3b3b0f861fc28029188098741a3afdf10e75274d0bc8cf69a656cf`, exactly matching the
+  pre-cache response hash. Target-distance construction ran once, and the scratch graph SHA-256 remained
+  `4856fc228ef03b4c164481824beabb513a53e43330e1e9a78739ed84f940a33e`.
+- Committed only the implementation and its regressions as `d175614`
+  (`refactor(intelligence): cache target path distances`). Documentation, specifications, governance
+  files, scratch graphs, and generated Graphify output remain outside the commit.
+
+### Verification evidence
+
+```text
+python -m unittest tests.intelligence.test_paths
+=> Ran 21 tests in 0.028s
+=> OK
+
+python -m unittest tests.intelligence.test_paths tests.intelligence.test_conformance tests.test_web_api tests.test_web_state
+=> Ran 42 tests in 3.721s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 81 tests in 4.518s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+DCA-Hedge repeated normalized path benchmark
+=> uncached: 3.0862 ms median; target-distance preprocessing 1.5953 ms median (51.7%)
+=> cached: 1.4440 ms median across 500 cache hits; one distance build
+=> 53.2% median reduction; response hash and scratch graph unchanged
+```
+
+### Remaining risk
+
+- The shared cache uses a lock to prevent miss stampedes, but concurrent HTTP contention has not yet been
+  load-tested. Cache hits hold the lock only for lookup and LRU promotion.
+- Each cached distance map is linear in reachable graph nodes. The 64-entry bound prevents unbounded
+  growth, but peak memory should be measured on a synthetic 10,000-node graph before increasing it.
+
+## Next objective
+
+Run a concurrent normalized HTTP path slice against one published snapshot to verify cache-hit
+determinism and miss-stampede prevention, then measure cache memory on the 10,000-node reference graph
+before changing the 64-entry capacity.
+
+## Concurrent HTTP and cache-memory acceptance
+
+- Traced the live adapter flow from `ThreadingHTTPServer` through
+  `DashboardState.intelligence_snapshot()` to the shared snapshot-owned `IntelligenceKernel`; no
+  adapter-specific path logic or alternate cache lifecycle was found.
+- Ran 16 simultaneous cold HTTP path requests against the receiver-aware DCA-Hedge graph while adding a
+  deliberate 50 ms delay to target-distance construction, followed by 64 warm requests. All 80 responses
+  returned HTTP 200, `application/json; charset=utf-8`, one body SHA-256
+  `eb16965a1904071bbad12601986524a3ba52f315d4c74365bc51e40e9ad8d3dd`, and identical completion
+  metadata. Target distances were constructed exactly once and the scratch graph hash remained unchanged.
+- HTTP transport timing included connection-queue/thread-scheduling outliers: cold p50/p95 were
+  73.190/541.388 ms and warm p50/p95 were 39.299/543.888 ms. These numbers are not used as kernel
+  performance evidence because the test deliberately delayed the cold builder and saturated a default
+  loopback listener; they identify transport backlog as a separate follow-up.
+- Added a permanent HTTP regression that synchronizes six request-handler threads immediately before the
+  shared kernel call, blocks the first distance build, and proves all responses stay byte-identical while
+  the builder call count remains one. Five consecutive focused runs passed in 0.513–0.530 seconds.
+- Measured Python heap allocations for the 64-entry cache on the deterministic 10,000-node/40,000-edge
+  reference graph. The cache retained 160,000 distance records and increased traced current heap by
+  3.284 MiB (about 52.55 KiB per entry); temporary peak was 5.623 MiB.
+- Inserting a 65th target kept 64 entries, 160,000 records, and 3.284 MiB current heap, confirming bounded
+  eviction. No capacity or production implementation change was justified; the only code change is the
+  concurrent HTTP acceptance regression.
+- Committed only the concurrent HTTP regression as `4146893`
+  (`test(web): cover concurrent path cache reuse`). Documentation, specifications, governance files,
+  scratch graphs, and generated Graphify output remain outside the commit.
+- Incrementally refreshed the directed Graphify index for the regression and this journal update. The
+  merged graph now contains 875 nodes, 1,447 edges, and 74 communities. Directed graph health reports
+  zero missing endpoints, dangling endpoints, self-loops, exact duplicates, or collapsed directed
+  endpoint pairs; the acceptance/cache-memory query reaches the new journal concepts and HTTP test.
+
+### Verification evidence
+
+```text
+5 x python -m unittest tests.test_web_api.DashboardHttpTests.test_concurrent_path_requests_share_one_distance_build
+=> each run passed; 0.513–0.530s
+
+python -m unittest tests.test_web_api
+=> Ran 10 tests in 2.398s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 82 tests in 5.063s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+git diff --check
+=> exit 0, no output
+
+DCA-Hedge concurrent normalized HTTP slice
+=> 16 cold + 64 warm requests; one target-distance build
+=> HTTP 200; stable JSON content type; one response hash; scratch graph unchanged
+
+10k target-distance cache memory slice
+=> 64 entries; 160,000 records; 3.284 MiB current; 5.623 MiB peak
+=> 65th key evicted oldest entry without increasing retained heap
+
+python -m graphify diagnose multigraph --graph graphify-out/graph.json --json --directed
+=> 875 nodes; 1,447 edges; directed graph
+=> missing/dangling/self-loop/exact-duplicate/directed-collapse counts all zero
+
+python -m graphify query "How do concurrent HTTP requests share one target-distance build and what did the 10k memory measurement show?" --budget 650
+=> reached Concurrent HTTP and Cache-Memory Acceptance, TargetDistanceCache,
+   IntelligenceKernel, and the concurrent HTTP/cache reuse tests
+```
+
+### Remaining risk
+
+- `ThreadingHTTPServer` uses the standard listener backlog and unbounded request threads. Under synthetic
+  16-way loopback bursts, transport p95 dominated the sub-5 ms kernel work even when responses remained
+  correct.
+- `tracemalloc` reports Python-managed allocations, not total process RSS or allocator fragmentation.
+  The measured cache delta is suitable for comparing cache capacity, not a full server memory budget.
+- The directed graph is healthy, but its undirected projection still collapses one reciprocal pair:
+  `_minimum_hops_to_targets()` calls `TargetDistanceCache.get()`, while the generic AST symbol named
+  `get()` also resolves back to `_minimum_hops_to_targets()`. Direction is therefore required when
+  consuming this relationship. Graphify has 74 saved labels for 74 communities but renamed three
+  communities by their hub; labels were intentionally not regenerated without an LLM key.
+
+## Next objective
+
+Profile loopback HTTP queueing at 8/16/32 concurrent requests without artificial kernel delay. If
+transport p95 remains disproportionate to kernel time, add explicit tested listener backlog and bounded
+request backpressure rather than relying on unbounded default threading.
+
+## Bounded loopback HTTP transport upgrade
+
+- Profiled the real normalized DCA-Hedge path route for 12 rounds each at 8, 16, and 32 simultaneous
+  new loopback connections. The target-distance cache was warm and no delay was added to the kernel.
+  Client TCP-connect time, time to API entry, kernel time, and total response latency were measured
+  separately.
+- The default `ThreadingHTTPServer` listener backlog was five. Kernel p95 stayed between 5.108 and
+  5.990 ms, while TCP-connect/total p95 reached 516.190/557.308 ms at concurrency 16 and
+  1,030.323/1,046.160 ms at concurrency 32. The alignment between connect and API-entry delay
+  classified the primary constraint as listener queueing and TCP retry, not Intelligence Kernel work.
+- Added `DashboardThreadingHTTPServer` with an explicit finite listener backlog of 64 and a
+  `BoundedSemaphore` budget of 32 request threads. Once all request slots are occupied, the accept loop
+  applies backpressure instead of creating additional unbounded handler threads; every acquired slot is
+  released after request completion or thread-start failure.
+- On the same 12-round workload, connect/total p95 became 2.628/35.890 ms at concurrency 8,
+  5.058/78.672 ms at concurrency 16, and 13.094/190.843 ms at concurrency 32. Kernel p95 remained
+  4.701–5.870 ms, all 672 measured responses returned HTTP 200 with one content type and one body hash,
+  and the scratch graph hash remained unchanged.
+- Added a deterministic saturation regression that reduces the per-instance budget to two, blocks those
+  two handlers, proves a third request cannot enter the API until a slot is released, and then verifies
+  all three responses complete with HTTP 200. Five consecutive focused runs passed.
+- Committed only the bounded server implementation and its regression as `bd412a8`
+  (`fix(web): bound dashboard request concurrency`). Documentation, specifications, governance files,
+  scratch graphs, and generated Graphify output remain outside the commit.
+- The local performance-tool catalog surfaced Locust for distributed load generation and httptap for
+  HTTP phase timing. Neither dependency was added: built-in `perf_counter_ns`, `HTTPConnection`, thread
+  barriers, and server-side instrumentation were sufficient for this loopback diagnosis.
+- The directed incremental Graphify refresh produced 892 nodes, 1,465 edges, and 72 communities: 17
+  nodes and 18 edges were added, with no removed nodes. Directed health reports zero missing or dangling
+  endpoints, self-loops, exact duplicates, and collapsed directed endpoint pairs; the existing reciprocal
+  path-cache pair still collapses only when projected as undirected.
+- Three bounded semantic-worker attempts did not produce a chunk. The fallback copied all existing 26
+  journal nodes and 37 journal-local edges from the healthy graph, then added only the nine explicit
+  transport concepts and nine relationships from this section. The generated counters remain zero rather
+  than estimating token usage. Generated Graphify output remains ignored and unstaged.
+
+### Verification evidence
+
+```text
+12-round DCA-Hedge baseline; 8/16/32 simultaneous new HTTP connections
+=> total p95: 42.329 / 557.308 / 1,046.160 ms
+=> connect p95: 2.542 / 516.190 / 1,030.323 ms
+=> kernel p95: 5.866 / 5.990 / 5.108 ms
+
+12-round DCA-Hedge bounded server; backlog=64; request threads=32
+=> total p95: 35.890 / 78.672 / 190.843 ms
+=> connect p95: 2.628 / 5.058 / 13.094 ms
+=> kernel p95: 4.701 / 5.582 / 5.870 ms
+=> HTTP 200 for all 672 responses; stable content type and body hash
+=> scratch graph hash unchanged
+
+5 x python -m unittest tests.test_web_api.DashboardHttpTests.test_server_bounds_listener_queue_and_request_threads
+=> each run passed; 0.573–0.582s
+
+python -m unittest tests.test_web_api
+=> Ran 11 tests in 2.910s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 83 tests in 5.454s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+web/npm run lint
+=> exit 0, no warnings
+
+web/npm run build
+=> exit 0; Vite production build completed
+
+git diff --check
+=> exit 0, no output
+
+python -m graphify diagnose multigraph --graph graphify-out/graph.json --json --directed
+=> 892 nodes; 1,465 edges; directed graph
+=> missing/dangling/self-loop/exact-duplicate/directed-collapse counts all zero
+
+python -m graphify query "How does the bounded loopback HTTP server prevent listener retry spikes and unbounded request threads?" --budget 550
+=> reached DashboardThreadingHTTPServer, create_server, the saturation regression,
+   bounded transport acceptance, and before/after latency concepts
+```
+
+### Remaining risk
+
+- The finite backlog is transport buffering, not an HTTP admission response. Bursts beyond the 64 queued
+  connections can still be delayed or refused by the operating system.
+- When 32 handlers are occupied, `process_request()` deliberately blocks the accept loop. A slow or hung
+  request therefore propagates backpressure; the server still has no explicit request-body execution
+  deadline or overload `503` policy.
+- At concurrency 32, synchronous HTTP/thread scheduling still dominates the approximately 6 ms kernel
+  p95, but TCP retry spikes are gone and total p95 remains well below the one-second reference threshold.
+- Semantic extraction used a validated deterministic fallback after three workers stalled. The affected
+  journal concepts are queryable, but this pass has no worker token telemetry and no extra inferred
+  cross-document relationships.
+
+## Next objective
+
+Exercise overload at 40/64/96 simultaneous clients with a bounded slow-handler fixture, then define whether
+the local dashboard should keep queued backpressure or return a deterministic `503` plus a socket deadline
+before adding any further server behavior.
+
+## Queued overload policy acceptance
+
+- Exercised the bounded server for five rounds each at 40, 64, and 96 simultaneous new loopback
+  connections. The fixture added 100 ms inside `DashboardApi.intelligence()` to model slow I/O while
+  retaining the real normalized DCA-Hedge path request, warm snapshot cache, HTTP parsing, response
+  serialization, and connection lifecycle.
+- All 1,000 requests completed with HTTP 200, one `application/json; charset=utf-8` content type, one body
+  hash, and an unchanged scratch graph hash. Observed active handlers peaked at exactly the configured
+  limit of 32.
+- At concurrency 40, connect/API-entry/service/total p95 were
+  7.284/203.507/174.793/333.246 ms. At 64 they were
+  12.349/250.279/195.336/459.998 ms. At 96 they were
+  540.812/653.209/179.405/760.230 ms; maximum total latency was 814.618 ms.
+- The 96-client connect delay shows that the 64-entry listener backlog is at its designed boundary, but
+  the three-wave queue remained bounded, lossless, deterministic, and below the one-second reference
+  threshold. Returning `503` would convert a successfully absorbed local burst into an adapter-visible
+  error without improving handler resource bounds.
+- Kept queued backpressure as the local overload policy. No production `503`, raw-socket rejection path,
+  or socket deadline was added. A handler delay is not evidence of a slow client, and a connection
+  deadline would not bound work already executing inside the API.
+- Expanded the saturation regression from three requests to five requests over a two-slot server. It now
+  locks three queued waves, peak concurrency two, five HTTP 200 responses, stable content type, and one
+  canonical body hash. The change is acceptance coverage only; production behavior is unchanged.
+- Committed only the expanded overload regression as `b64a4f0`
+  (`test(web): cover queued overload waves`). Documentation, specifications, governance files, scratch
+  graphs, and generated Graphify output remain outside the commit.
+- The local catalog again surfaced Locust and httptap. Built-in `HTTPConnection`, barriers,
+  `perf_counter_ns`, and server-side counters remained sufficient, so no dependency or framework change
+  was justified.
+- The directed incremental Graphify refresh produced 901 nodes, 1,468 edges, and 78 communities: nine
+  overload-policy concepts were added, no nodes were removed, and the final directed graph reports zero
+  missing or dangling endpoints, self-loops, exact duplicates, or collapsed directed pairs. The existing
+  path-cache reciprocal pair still collapses only under an undirected projection.
+- Semantic extraction succeeded from a bounded prepared input containing all 35 existing journal nodes,
+  46 journal-local edges, and only this new section. The worker returned 44 nodes and 62 edges; its
+  interface exposed no usage telemetry, so token counters remain zero. Generated Graphify output remains
+  ignored and unstaged.
+
+### Verification evidence
+
+```text
+DCA-Hedge slow-handler overload; delay=100 ms; five rounds per level
+=> 40 clients: 200/200 HTTP 200; total p95/max 333.246/340.503 ms
+=> 64 clients: 320/320 HTTP 200; total p95/max 459.998/465.433 ms
+=> 96 clients: 480/480 HTTP 200; total p95/max 760.230/814.618 ms
+=> peak active handlers=32; stable content type and body hash
+=> scratch graph hash unchanged
+
+5 x python -m unittest tests.test_web_api.DashboardHttpTests.test_server_bounds_listener_queue_and_request_threads
+=> each run passed; 0.568–0.580s
+
+python -m unittest tests.test_web_api
+=> Ran 11 tests in 2.893s
+=> OK
+
+python -m unittest discover -s tests
+=> Ran 83 tests in 5.465s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+web/npm run lint
+=> exit 0, no warnings
+
+web/npm run build
+=> exit 0; Vite production build completed
+
+git diff --check
+=> exit 0, no output
+
+python -m graphify diagnose multigraph --graph graphify-out/graph.json --json --directed
+=> 901 nodes; 1,468 edges; directed graph
+=> missing/dangling/self-loop/exact-duplicate/directed-collapse counts all zero
+
+python -m graphify query "Why does the dashboard keep queued overload backpressure instead of returning HTTP 503 or adding a socket deadline?" --budget 500
+=> reached the queued-overload acceptance, lossless three-wave queue,
+   keep-queue decision, rejected-503 rationale, and deferred-deadline concepts
+```
+
+### Remaining risk
+
+- The 96-client slice is the exact 32-active plus 64-queued design boundary. Larger bursts can still
+  experience TCP retry or refusal; this is explicit finite backpressure rather than unlimited admission.
+- The test models slow handler execution, not a client that stalls while sending headers or a declared
+  request body. Such a client can still retain one of the 32 slots because no per-connection read deadline
+  exists.
+- Results are machine-specific loopback evidence. They do not establish WAN behavior or a general-purpose
+  production-server capacity.
+- Graphify has 78 communities against 72 saved labels and renamed 67 communities by their hub because
+  labels were not regenerated without an LLM key.
+
+## Next objective
+
+Exercise slow-header and partial-body clients against a reduced two-slot server, measure slot retention
+and shutdown responsiveness, then add a narrowly scoped connection read deadline only if an idle client
+can monopolize a slot indefinitely without breaking existing local dashboard requests.
+
+## Idle request read deadline acceptance
+
+- Reproduced one slow-header client and one partial-body client against a two-slot
+  `DashboardThreadingHTTPServer` for three rounds. With no read timeout, both clients retained all
+  request slots after 250 ms and 750 ms, a third `/api/health` request remained queued, and
+  `shutdown()` did not return within 250 ms.
+- Closing the two idle clients released the pre-change server in 2.786-2.921 ms and allowed the queued
+  health request to complete after 1,006.508-1,020.033 ms. Live source inspection confirmed that accepted
+  sockets inherited blocking mode and no handler path assigned a read timeout, so an idle peer could
+  retain a request thread without a finite bound.
+- Added a two-second idle request-read timeout to `DashboardThreadingHTTPServer`. The handler applies it
+  while reading the request line, headers, and declared body, then restores blocking mode before kernel
+  execution or response writes. An incomplete request that times out is closed by the standard HTTP
+  handler; it does not create a new normalized or legacy API error/status contract.
+- Added a raw-socket regression that occupies both slots with the slow-header and partial-body clients,
+  proves a third request reached the full semaphore, starts shutdown while the accept loop is blocked,
+  and verifies that the deadline closes both idle connections, releases both slots, allows the health
+  request to return HTTP 200 JSON, and bounds shutdown.
+- With the production two-second timeout, three after-change rounds closed both idle clients and returned
+  the queued health response in 2,002.974-2,010.056 ms. `shutdown()` was invoked at the 750 ms observation
+  point and returned 1,249.864-1,255.764 ms later in every round, rather than waiting for external client
+  cleanup.
+- Classified the bottleneck as blocking network I/O coupled to request-thread saturation and semaphore
+  backpressure. The local catalog categories searched were Testing, HTTP Clients, and Web Servers.
+  Locust is suitable for scalable request load, httpx/aiohttp for complete HTTP exchanges, and httptap
+  for phase timing; none provides more precise incomplete-header/body control than the standard
+  `socket`, `HTTPConnection`, events, and monotonic clock already used by the regression, so no dependency
+  was added.
+- The final directed incremental Graphify refresh produced 924 nodes, 1,538 edges, and 76 communities. It
+  added 23 nodes and 76 edges, removed six stale re-extracted edges, preserved 73 community labels by
+  maximum node overlap, and used hub labels for three new communities. The changed-code AST fragment
+  contained 46 nodes and 132 edges. The first bounded journal semantic fragment preserved all 44 existing
+  node IDs and returned 55 nodes and 85 edges; the final journal-plus-query-memory fragment preserved all
+  55 continuity IDs and returned 64 nodes and 111 edges.
+- Directed graph health reports zero missing or dangling endpoints, self-loops, exact duplicates, or
+  collapsed directed pairs. Three reciprocal pairs collapse only under an undirected projection: the
+  existing path-cache call pair and two journal relationships connecting the final refresh to its label
+  preservation and health concepts. The semantic worker exposed no usage telemetry, so token counters
+  remain zero.
+
+### Verification evidence
+
+```text
+pre-change raw-socket baseline; 2 slots; 1 slow header + 1 partial body; 3 rounds
+=> slots after 250/750 ms: 0/0 in every round
+=> queued health completed after 1,006.508-1,020.033 ms only after client cleanup
+=> shutdown returned within 250 ms: false in every round
+=> client close to shutdown: 2.786-2.921 ms
+
+post-change raw-socket acceptance; production read timeout=2.0s; 3 rounds
+=> both idle connections closed in every round
+=> queued health: 3/3 HTTP 200 in 2,002.974-2,010.056 ms
+=> shutdown called at 750 ms and returned 1,249.864-1,255.764 ms later
+
+5 x python -m unittest tests.test_web_api.DashboardHttpTests.test_server_read_deadline_releases_idle_clients_and_shutdown
+=> each run passed; test runtime 0.222-0.253s
+
+3 x python -m unittest tests.test_web_api
+=> 12 tests passed in 3.107s, 3.120s, and 3.157s
+
+python -m unittest discover -s tests
+=> Ran 84 tests in 5.728s
+=> OK
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+web/npm run lint
+=> exit 0, no warnings
+
+web/npm run build
+=> exit 0; Vite production build completed in 634ms
+
+git diff --check
+=> exit 0, no output
+
+python -m graphify diagnose multigraph --graph graphify-out/graph.json --json --directed
+=> 924 nodes; 1,538 edges; directed graph
+=> missing/dangling/self-loop/exact-duplicate/directed-collapse counts all zero
+=> undirected-only collapse count is three
+
+python -m graphify query "idle timeout shutdown header body slot socket request deadline saturation" --dfs --budget 1000
+=> reached the idle-retention acceptance, two-second timeout, slow-header and partial-body clients,
+   bounded shutdown, raw-socket regression, request-slot admission, and deferred absolute deadline
+```
+
+### Remaining risk
+
+- `socket.settimeout()` bounds one idle blocking operation, not the total wall-clock duration of a request.
+  A peer that deliberately sends another byte before every two-second idle interval can still retain a
+  slot; this local loopback server does not yet enforce an absolute header/body deadline.
+- A legitimate local client paused for more than two seconds while sending its at-most-64-KiB body will
+  be disconnected. Existing complete GET, legacy POST, and normalized POST regressions remained green.
+- Under full request-thread saturation with an already accepted queued request, shutdown can wait for the
+  remaining portion of the two-second read timeout. It is now bounded, not instantaneous.
+
+## Final compatibility and real-project acceptance
+
+### Outcome
+
+- Re-ran the idle-client regression after the transport fix at `c5cba80`; the two-slot
+  slow-header plus partial-body case passed in 0.218 seconds with both slots recovered, the queued
+  health request served as JSON HTTP 200, and shutdown bounded by the configured read deadline.
+- Exercised the production dashboard against
+  `C:\work\Example-MQL5` using the receiver-aware graph: 57 files, 1,250 nodes,
+  6,386 edges, and 127 diagnostics. Search returned four `OnTick` matches; focusing
+  `CMainEngine::OnTick` produced 23 nodes and 32 relationships, and impact tracing exposed four
+  upstream entries including the EA event handler and MetaTrader runtime.
+- Browser smoke verification recorded zero console errors or warnings. Status, graph,
+  diagnostics, query, context, and impact requests all returned HTTP 200.
+- The live normalized path from `OnTick` to `CMainEngine::OnTick` returned one complete `calls`
+  hop. CLI and HTTP results were structurally equal after normalizing the HTTP server's expected
+  local `snapshot_revision=1` to `null`, matching the conformance-test normalization policy.
+- Legacy `GET /api/query` retained JSON HTTP 200 and the exact top-level
+  `query,results,version` shape. Normalized path retained
+  `application/json; charset=utf-8`; a one-target request returned JSON HTTP 400 with
+  `missing_target`.
+- Code review and `git diff --check` found no cleanup defect or additional code change worth a
+  synthetic refactor commit. The verified implementation remains committed at
+  `c5cba80 fix(web): bound idle request reads`; current specification, ADR, journal, and related
+  documentation changes remain outside the commit.
+
+### Verification evidence
+
+```text
+python -m unittest -v tests.test_web_api.DashboardHttpTests.test_server_read_deadline_releases_idle_clients_and_shutdown
+=> 1 test passed in 0.218s
+
+python -m unittest tests.test_web_api tests.test_cli tests.intelligence.test_conformance tests.intelligence.test_paths tests.intelligence.test_context
+=> 53 tests passed in 5.678s
+
+python -m unittest discover -s tests
+=> 84 tests passed in 5.810s
+
+python -m compileall -q src tests tools
+=> exit 0, no output
+
+web/npm run lint
+=> exit 0, no warnings
+
+web/npm run build
+=> exit 0; Vite production build completed in 442ms
+
+Playwright dashboard smoke, DCA-Hedge
+=> 0 console errors; 0 warnings
+=> GET status/graph/diagnostics/query/context/impact: all HTTP 200
+=> focused context: 23 nodes, 32 relationships
+=> upstream impact entries: 4
+=> screenshot: output/playwright/dca-dashboard-smoke.png
+
+live API compatibility
+=> legacy query: HTTP 200 JSON; keys query,results,version
+=> normalized path: HTTP 200 JSON; 1 complete calls hop
+=> invalid normalized path: HTTP 400 JSON; missing_target
+=> CLI/HTTP normalized path payloads semantically equal after snapshot-revision normalization
+
+git diff --check
+=> exit 0, no output
+```
+
+### Residual risk
+
+- The two-second socket timeout bounds idle reads, not total request wall time. A deliberate client
+  sending a byte just before each idle interval can still retain a slot; an absolute request-read
+  deadline remains intentionally deferred until a slow-drip acceptance test proves it necessary.
+- The 127 DCA-Hedge diagnostics are visible, evidence-backed index results dominated by unresolved
+  platform or external symbols; this smoke run did not classify each diagnostic as a source defect.
+- The dashboard graph projection remains intentionally capped at 900 nodes while focused context and
+  intelligence responses operate on the complete canonical graph.
+
+## Next objective
+
+Exercise a one-byte slow-drip client at intervals just below two seconds while normal browser/API requests
+run under CPU pressure, then add an absolute header/body deadline only if that local threat justifies the
+extra handler state and compatibility cost.

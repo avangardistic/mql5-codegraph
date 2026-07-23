@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=83"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Evidence-backed static code graph indexer for MQL5 repositories"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "MQL5 CodeGraph Contributors" }]
 keywords = ["mql5", "metatrader", "static-analysis", "codegraph"]
 classifiers = [

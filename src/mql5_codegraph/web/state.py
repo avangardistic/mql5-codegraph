@@ -60,8 +60,8 @@ class DashboardState:
         self._jobs: OrderedDict[str, AnalysisJob] = OrderedDict()
         self._last_error: str | None = None
 
-    def load_graph(self, graph: CodeGraph, root: str | Path) -> None:
-        resolved_root = Path(root).resolve()
+    def load_graph(self, graph: CodeGraph, root: str | Path | None = None) -> None:
+        resolved_root = Path(root).resolve() if root is not None else None
         with self._lock:
             revision = self._graph_version + 1
             kernel = IntelligenceKernel(graph, snapshot_revision=revision)

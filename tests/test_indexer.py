@@ -1,14 +1,73 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
-from mql5_codegraph.indexer import analyze_repository
+from mql5_codegraph.indexer import analyze_repository, discover_sources
+from mql5_codegraph.parser import parse_source
+from mql5_codegraph.resolver import ParsedUnit, _resolve_include
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "basic_ea"
 
 
 class IndexerTests(TestCase):
+    def test_include_resolution_rejects_absolute_paths_before_filesystem_probe(self) -> None:
+        unit = ParsedUnit(
+            Path("D:/repo/main.mq5"),
+            "main.mq5",
+            parse_source("", "main.mq5"),
+        )
+
+        with patch.object(Path, "is_file", side_effect=AssertionError("unexpected probe")):
+            for target in (
+                "C:\\outside\\Secrets.mqh",
+                "\\\\server\\share\\Secrets.mqh",
+                "/outside/Secrets.mqh",
+            ):
+                with self.subTest(target=target):
+                    self.assertIsNone(
+                        _resolve_include(unit, target, False, Path("D:/repo"), ())
+                    )
+
+    def test_parent_relative_include_resolves_only_inside_approved_root(self) -> None:
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "root"
+            source = root / "sub" / "Main.mq5"
+            include = root / "Shared.mqh"
+            outside = base / "Outside.mqh"
+            source.parent.mkdir(parents=True)
+            source.write_text("", encoding="utf-8")
+            include.write_text("", encoding="utf-8")
+            outside.write_text("", encoding="utf-8")
+            unit = ParsedUnit(
+                source.resolve(),
+                "sub/Main.mq5",
+                parse_source("", "sub/Main.mq5"),
+            )
+
+            resolved = _resolve_include(unit, "../Shared.mqh", False, root, ())
+            escaped = _resolve_include(unit, "../../Outside.mqh", False, root, ())
+
+        self.assertEqual(include.resolve(), resolved)
+        self.assertIsNone(escaped)
+
+    def test_source_discovery_ignores_symlinks_that_escape_root(self) -> None:
+        with TemporaryDirectory() as root_directory, TemporaryDirectory() as outside_directory:
+            root = Path(root_directory)
+            outside = Path(outside_directory) / "Outside.mq5"
+            outside.write_text("void OnTick() {}", encoding="utf-8")
+            link = root / "Linked.mq5"
+            try:
+                link.symlink_to(outside)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"symlink creation unavailable: {error}")
+
+            sources = discover_sources(root)
+
+        self.assertEqual([], sources)
+
     def test_builds_resolved_and_runtime_graph(self) -> None:
         graph = analyze_repository(FIXTURE)
         names = {node.qualified_name for node in graph.nodes.values()}

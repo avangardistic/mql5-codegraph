@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterable
 
 from .diagnostics import Diagnostic, AMBIGUOUS_CALL, UNRESOLVED_CALL, UNRESOLVED_INCLUDE
@@ -39,14 +39,32 @@ def _resolve_include(
     unit: ParsedUnit, target: str, system: bool, root: Path, include_roots: Iterable[Path],
 ) -> Path | None:
     normalized = target.replace("\\", "/")
+    windows_target = PureWindowsPath(target)
+    if (
+        not normalized
+        or PurePosixPath(normalized).is_absolute()
+        or windows_target.is_absolute()
+        or bool(windows_target.drive)
+    ):
+        return None
+    resolved_root = root.resolve()
+    resolved_include_roots = tuple(path.resolve() for path in include_roots)
+    approved_roots = (resolved_root, *resolved_include_roots)
     candidates: list[Path] = []
     if not system:
         candidates.append(unit.absolute_path.parent / normalized)
-    candidates.append(root / normalized)
-    candidates.extend(path / normalized for path in include_roots)
+    candidates.append(resolved_root / normalized)
+    candidates.extend(path / normalized for path in resolved_include_roots)
     for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
+        resolved_candidate = candidate.resolve()
+        if not any(
+            resolved_candidate == approved
+            or resolved_candidate.is_relative_to(approved)
+            for approved in approved_roots
+        ):
+            continue
+        if resolved_candidate.is_file():
+            return resolved_candidate
     return None
 
 

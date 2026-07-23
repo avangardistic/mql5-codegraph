@@ -12,10 +12,10 @@ mql5-codegraph serve --root C:\work\Example-MQL5
 Useful options:
 
 - `--include-root <path>` adds an MQL5 include lookup root.
-- `--graph <graph.json>` opens a saved graph; use `--root` when its metadata lacks a valid root.
+- `--graph <graph.json>` opens a saved graph; add an explicit `--root` to enable source viewing.
 - `--port 0` requests an available loopback port.
 - `--no-browser` starts without opening the default browser.
-- `--host` should remain `127.0.0.1` unless the operator explicitly accepts network exposure.
+- `--host` accepts only loopback addresses. Remote exposure is not a supported dashboard mode.
 
 ## Product workflow
 
@@ -31,10 +31,19 @@ canonical graph. This separates analysis scale from visualization scale.
 ## Security boundary
 
 - The default listener is loopback-only and emits no permissive CORS headers.
+- Non-loopback binds and non-loopback `Host` authorities are rejected. Browser `Origin` requests must target
+  the same loopback port.
 - Request bodies are limited to 64 KiB.
+- Request reads have a two-second idle timeout and a ten-second absolute deadline, so a slow-drip client
+  cannot retain a finite request slot indefinitely.
 - Source reads accept only `.mq5` and `.mqh` files contained under the active repository root.
+- Saved graph metadata is not trusted to select that source root. Loading `--graph` without an explicit
+  `--root` leaves intelligence available but disables the source viewer.
 - Source viewer files are capped at 2 MiB.
 - Static responses include CSP, same-origin resource, referrer, and content-type protections.
+
+The server has no authentication because it is not a network service. Any future remote or multi-user
+deployment requires a separately designed authenticated adapter or trusted reverse proxy boundary.
 
 ## Frontend development
 

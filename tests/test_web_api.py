@@ -69,6 +69,17 @@ class DashboardApiTests(TestCase):
             self.api.source({"file": ["BasicEA.txt"]})
         self.assertIn(denied.exception.status, {403, 404})
 
+    def test_saved_graph_without_explicit_root_disables_source_viewer(self) -> None:
+        graph, _, _ = self.state.snapshot()
+        state = DashboardState()
+        state.load_graph(graph)
+
+        with self.assertRaises(ApiError) as unavailable:
+            DashboardApi(state).source({"file": ["BasicEA.mq5"]})
+
+        self.assertEqual(409, unavailable.exception.status)
+        self.assertEqual("root_not_ready", unavailable.exception.code)
+
     def test_invalid_parameters_are_structured_errors(self) -> None:
         with self.assertRaises(ApiError) as missing:
             self.api.query({})
@@ -172,6 +183,49 @@ class DashboardApiTests(TestCase):
 
 
 class DashboardHttpTests(TestCase):
+    def test_server_rejects_non_loopback_bind_and_request_authorities(self) -> None:
+        state = DashboardState()
+        with self.assertRaisesRegex(ValueError, "loopback"):
+            create_server(state, host="0.0.0.0", port=0)
+
+        server = create_server(state, port=0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def get(headers: dict[str, str]) -> tuple[int, dict[str, object]]:
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+            connection.putrequest("GET", "/api/health", skip_host=True)
+            for name, value in headers.items():
+                connection.putheader(name, value)
+            connection.endheaders()
+            response = connection.getresponse()
+            result = response.status, json.loads(response.read())
+            connection.close()
+            return result
+
+        try:
+            status, payload = get({"Host": "example.test"})
+            self.assertEqual(421, status)
+            self.assertEqual("host_not_allowed", payload["error"]["code"])
+
+            status, payload = get({
+                "Host": f"127.0.0.1:{server.server_port}",
+                "Origin": "https://example.test",
+            })
+            self.assertEqual(403, status)
+            self.assertEqual("origin_not_allowed", payload["error"]["code"])
+
+            status, payload = get({
+                "Host": f"127.0.0.1:{server.server_port}",
+                "Origin": f"http://127.0.0.1:{server.server_port}",
+            })
+            self.assertEqual(200, status)
+            self.assertTrue(payload["ok"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_http_health_static_and_malformed_json(self) -> None:
         state = ready_state()
         with TemporaryDirectory() as directory:
@@ -539,6 +593,76 @@ class DashboardHttpTests(TestCase):
                 server.shutdown()
             probe_thread.join(timeout=2)
             shutdown_thread.join(timeout=2)
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_absolute_read_deadline_releases_slow_drip_clients(self) -> None:
+        state = DashboardState()
+        with (
+            patch.object(DashboardThreadingHTTPServer, "max_request_threads", 2),
+            patch.object(
+                DashboardThreadingHTTPServer,
+                "request_read_timeout_seconds",
+                0.2,
+            ),
+            patch.object(
+                DashboardThreadingHTTPServer,
+                "request_read_deadline_seconds",
+                0.5,
+            ),
+        ):
+            server = create_server(state, port=0)
+        thread = Thread(
+            target=server.serve_forever,
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
+        thread.start()
+        clients = [
+            socket.create_connection(("127.0.0.1", server.server_port), timeout=1)
+            for _ in range(2)
+        ]
+        stop_drip = Event()
+
+        def drip(client: socket.socket) -> None:
+            while not stop_drip.wait(0.05):
+                try:
+                    client.sendall(b"x")
+                except OSError:
+                    return
+
+        drippers = [Thread(target=drip, args=(client,), daemon=True) for client in clients]
+        for dripper in drippers:
+            dripper.start()
+        try:
+            slots_deadline = monotonic() + 1
+            while server._request_slots._value and monotonic() < slots_deadline:
+                sleep(0.005)
+            self.assertEqual(0, server._request_slots._value)
+
+            started = monotonic()
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+            connection.request("GET", "/api/health")
+            response = connection.getresponse()
+            elapsed = monotonic() - started
+            payload = json.loads(response.read())
+            connection.close()
+
+            self.assertEqual(200, response.status)
+            self.assertTrue(payload["ok"])
+            self.assertGreater(elapsed, 0.25)
+            self.assertLess(elapsed, 1.5)
+        finally:
+            stop_drip.set()
+            for client in clients:
+                try:
+                    client.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                client.close()
+            for dripper in drippers:
+                dripper.join(timeout=1)
+            server.shutdown()
             server.server_close()
             thread.join(timeout=2)
 
