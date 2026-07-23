@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from heapq import heappop, heappush
@@ -110,6 +111,36 @@ def _transitions(
     )
 
 
+def _minimum_hops_to_targets(
+    index: GraphIndex,
+    target_ids: Iterable[str],
+    direction: str,
+    allowed_relationships: frozenset[str],
+) -> dict[str, int]:
+    """Return an optimistic target-distance lower bound for safe branch pruning."""
+
+    predecessors: dict[str, set[str]] = {}
+    for edge in index.edges.values():
+        if allowed_relationships and edge.relationship not in allowed_relationships:
+            continue
+        if direction in {"outgoing", "both"}:
+            predecessors.setdefault(edge.target, set()).add(edge.source)
+        if direction in {"incoming", "both"}:
+            predecessors.setdefault(edge.source, set()).add(edge.target)
+
+    distances = {target_id: 0 for target_id in target_ids}
+    pending = deque(sorted(distances))
+    while pending:
+        node_id = pending.popleft()
+        distance = distances[node_id] + 1
+        for predecessor_id in sorted(predecessors.get(node_id, ())):
+            if predecessor_id in distances:
+                continue
+            distances[predecessor_id] = distance
+            pending.append(predecessor_id)
+    return distances
+
+
 def _completion(
     *,
     path_count: int,
@@ -201,6 +232,13 @@ def find_directed_paths_between(
 
     allowed_relationships = frozenset(relationship_types)
     evidence_cache: dict[str, EvidenceReference] = {}
+    transition_cache: dict[str, tuple[tuple[GraphEdge, str, str], ...]] = {}
+    minimum_hops = _minimum_hops_to_targets(
+        index,
+        targets,
+        direction,
+        allowed_relationships,
+    )
 
     def evidence_for(edge: GraphEdge) -> EvidenceReference:
         evidence = evidence_cache.get(edge.id)
@@ -208,6 +246,18 @@ def find_directed_paths_between(
             evidence = _evidence_for(edge, evidence_probe)
             evidence_cache[edge.id] = evidence
         return evidence
+
+    def transitions_for(node_id: str) -> tuple[tuple[GraphEdge, str, str], ...]:
+        transitions = transition_cache.get(node_id)
+        if transitions is None:
+            transitions = tuple(
+                transition
+                for transition in _transitions(index, node_id, direction)
+                if not allowed_relationships
+                or transition[0].relationship in allowed_relationships
+            )
+            transition_cache[node_id] = transitions
+        return transitions
 
     serial = count()
     frontier: list[
@@ -240,16 +290,18 @@ def find_directed_paths_between(
         explored_node_ids.add(state.current_id)
         if state.current_id in targets:
             candidates.append(state)
+            if len(candidates) > bounds.max_paths and frontier:
+                if limiting_reason is None:
+                    limiting_reason = "max_paths"
+                stop_search = True
             continue
 
-        transitions = tuple(
-            transition
-            for transition in _transitions(index, state.current_id, direction)
-            if not allowed_relationships
-            or transition[0].relationship in allowed_relationships
-        )
+        transitions = transitions_for(state.current_id)
         if len(state.hops) >= bounds.max_depth:
-            if any(other_id not in state.node_ids for _, other_id, _ in transitions):
+            if any(
+                other_id not in state.node_ids and other_id in minimum_hops
+                for _, other_id, _ in transitions
+            ):
                 if limiting_reason is None:
                     limiting_reason = "max_depth"
             continue
@@ -262,6 +314,14 @@ def find_directed_paths_between(
                 break
             explored_edges += 1
             if other_id in state.node_ids:
+                continue
+            remaining_depth = bounds.max_depth - len(state.hops) - 1
+            target_distance = minimum_hops.get(other_id)
+            if target_distance is None:
+                continue
+            if target_distance > remaining_depth:
+                if limiting_reason is None:
+                    limiting_reason = "max_depth"
                 continue
 
             evidence = evidence_for(edge)

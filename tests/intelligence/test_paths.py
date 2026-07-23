@@ -542,6 +542,85 @@ class DirectedPathTests(TestCase):
         self.assertEqual("max_paths", result.completion.reason)
         self.assertEqual({"paths": 1}, dict(result.completion.omitted_counts))
 
+    def test_path_quota_stops_after_an_omitted_path_is_proven(self) -> None:
+        source = make_node("Source", node_id="node:source")
+        alternatives = tuple(
+            make_node(name, node_id=f"node:{name.casefold()}")
+            for name in ("Alpha", "Beta", "Gamma")
+        )
+        target = make_node("Target", node_id="node:target")
+        edges = tuple(
+            edge
+            for position, alternative in enumerate(alternatives)
+            for edge in (
+                make_edge(
+                    source,
+                    alternative,
+                    edge_id=f"edge:{position}:first",
+                ),
+                make_edge(
+                    alternative,
+                    target,
+                    edge_id=f"edge:{position}:second",
+                ),
+            )
+        )
+
+        result = find_directed_paths(
+            GraphIndex(build_graph([source, *alternatives, target], edges)),
+            source.id,
+            target.id,
+            IntelligenceBounds(max_depth=2, max_paths=1, max_expansions=100),
+        )
+
+        self.assertEqual(1, len(result.paths))
+        self.assertFalse(result.completion.search_complete)
+        self.assertTrue(result.completion.truncated)
+        self.assertEqual("max_paths", result.completion.reason)
+        self.assertEqual({"paths": None}, dict(result.completion.omitted_counts))
+
+    def test_target_distance_prunes_dense_disconnected_branches(self) -> None:
+        source = make_node("Source", node_id="node:source")
+        target = make_node("Target", node_id="node:target")
+        dead_ends = tuple(
+            make_node(f"Dead{position}", node_id=f"node:dead-{position}")
+            for position in range(8)
+        )
+        edges = [
+            make_edge(source, target, edge_id="edge:source-target"),
+            *(
+                make_edge(
+                    source,
+                    dead_end,
+                    edge_id=f"edge:source-dead-{position}",
+                )
+                for position, dead_end in enumerate(dead_ends)
+            ),
+        ]
+        edges.extend(
+            make_edge(
+                left,
+                right,
+                edge_id=f"edge:dead-{left_position}-{right_position}",
+            )
+            for left_position, left in enumerate(dead_ends)
+            for right_position, right in enumerate(dead_ends)
+            if left_position != right_position
+        )
+
+        result = find_directed_paths(
+            GraphIndex(build_graph([source, target, *dead_ends], edges)),
+            source.id,
+            target.id,
+            IntelligenceBounds(max_depth=5, max_paths=1, max_expansions=20),
+        )
+
+        self.assertEqual((source.id, target.id), result.paths[0].node_ids)
+        self.assertTrue(result.completion.search_complete)
+        self.assertFalse(result.completion.truncated)
+        self.assertEqual("complete", result.completion.reason)
+        self.assertEqual(9, result.completion.explored_edges)
+
     def test_disconnected_search_is_not_connected_only_after_exhaustion(self) -> None:
         source = make_node("Source", node_id="node:source")
         reachable = make_node("Reachable", node_id="node:reachable")
