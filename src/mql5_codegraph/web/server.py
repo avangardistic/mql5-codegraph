@@ -8,6 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 from pathlib import Path
+from threading import BoundedSemaphore
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 import webbrowser
@@ -18,6 +19,33 @@ from .api import ApiError, DashboardApi
 from .state import DashboardState
 
 MAX_BODY_BYTES = 64 * 1024
+
+
+class DashboardThreadingHTTPServer(ThreadingHTTPServer):
+    """Loopback server with a finite listener queue and request-thread budget."""
+
+    request_queue_size = 64
+    max_request_threads = 32
+    daemon_threads = True
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.max_request_threads = type(self).max_request_threads
+        self._request_slots = BoundedSemaphore(self.max_request_threads)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        self._request_slots.acquire()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
@@ -167,9 +195,7 @@ def create_server(
     root = Path(static_root) if static_root else Path(__file__).resolve().parent.parent / "web_static"
     api = DashboardApi(state)
     handler = partial(DashboardRequestHandler, api=api, static_root=root)
-    server = ThreadingHTTPServer((host, port), handler)
-    server.daemon_threads = True
-    return server
+    return DashboardThreadingHTTPServer((host, port), handler)
 
 
 def serve_dashboard(

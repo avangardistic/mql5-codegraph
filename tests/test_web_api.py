@@ -4,7 +4,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Barrier, Event, Thread
+from threading import Barrier, Event, Lock, Thread
 from time import monotonic, sleep
 from unittest import TestCase
 from unittest.mock import patch
@@ -14,7 +14,7 @@ from mql5_codegraph.indexer import analyze_repository
 from mql5_codegraph.intelligence import IntelligenceError
 from mql5_codegraph.intelligence import paths as path_module
 from mql5_codegraph.web.api import ApiError, DashboardApi
-from mql5_codegraph.web.server import create_server
+from mql5_codegraph.web.server import DashboardThreadingHTTPServer, create_server
 from mql5_codegraph.web.state import DashboardState
 from tests.intelligence.helpers import build_graph, make_edge, make_node
 
@@ -316,6 +316,94 @@ class DashboardHttpTests(TestCase):
             )
         finally:
             release_builder.set()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_server_bounds_listener_queue_and_request_threads(self) -> None:
+        source = make_node("Source", node_id="node:source")
+        target = make_node("Target", node_id="node:target")
+        state = DashboardState()
+        state.load_graph(
+            build_graph(
+                [source, target],
+                (make_edge(source, target, edge_id="edge:source-target"),),
+            ),
+            Path.cwd(),
+        )
+        with patch.object(DashboardThreadingHTTPServer, "max_request_threads", 2):
+            server = create_server(state, port=0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        api = server.RequestHandlerClass.keywords["api"]
+        payload = {
+            "contract_version": "1.0.0",
+            "targets": [
+                {"value": source.id, "kind": None},
+                {"value": target.id, "kind": None},
+            ],
+        }
+        body = json.dumps(payload).encode("utf-8")
+        entered_two = Event()
+        release_handlers = Event()
+        active_lock = Lock()
+        active_handlers = 0
+        peak_handlers = 0
+        original_intelligence = api.intelligence
+
+        def blocked_intelligence(operation, request):
+            nonlocal active_handlers, peak_handlers
+            with active_lock:
+                active_handlers += 1
+                peak_handlers = max(peak_handlers, active_handlers)
+                if active_handlers == 2:
+                    entered_two.set()
+            try:
+                if not release_handlers.wait(2):
+                    raise TimeoutError("request handler release timed out")
+                return original_intelligence(operation, request)
+            finally:
+                with active_lock:
+                    active_handlers -= 1
+
+        def post() -> int:
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            connection.request(
+                "POST",
+                "/api/v1/intelligence/path",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = connection.getresponse()
+            response.read()
+            connection.close()
+            return response.status
+
+        try:
+            self.assertEqual(64, server.request_queue_size)
+            self.assertEqual(2, server.max_request_threads)
+            with patch.object(
+                api,
+                "intelligence",
+                side_effect=blocked_intelligence,
+            ) as intelligence:
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    futures = [executor.submit(post) for _ in range(3)]
+                    try:
+                        self.assertTrue(entered_two.wait(2))
+                        sleep(0.05)
+                        self.assertEqual(2, intelligence.call_count)
+                        self.assertEqual(2, peak_handlers)
+                    finally:
+                        release_handlers.set()
+                    self.assertEqual([200, 200, 200], [future.result(timeout=3) for future in futures])
+                self.assertEqual(3, intelligence.call_count)
+            self.assertEqual(2, peak_handlers)
+        finally:
+            release_handlers.set()
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
