@@ -366,7 +366,7 @@ class DashboardHttpTests(TestCase):
                 with active_lock:
                     active_handlers -= 1
 
-        def post() -> int:
+        def post() -> tuple[int, str | None, bytes]:
             connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
             connection.request(
                 "POST",
@@ -378,9 +378,13 @@ class DashboardHttpTests(TestCase):
                 },
             )
             response = connection.getresponse()
-            response.read()
+            result = (
+                response.status,
+                response.getheader("Content-Type"),
+                response.read(),
+            )
             connection.close()
-            return response.status
+            return result
 
         try:
             self.assertEqual(64, server.request_queue_size)
@@ -390,8 +394,8 @@ class DashboardHttpTests(TestCase):
                 "intelligence",
                 side_effect=blocked_intelligence,
             ) as intelligence:
-                with ThreadPoolExecutor(max_workers=3) as executor:
-                    futures = [executor.submit(post) for _ in range(3)]
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [executor.submit(post) for _ in range(5)]
                     try:
                         self.assertTrue(entered_two.wait(2))
                         sleep(0.05)
@@ -399,8 +403,14 @@ class DashboardHttpTests(TestCase):
                         self.assertEqual(2, peak_handlers)
                     finally:
                         release_handlers.set()
-                    self.assertEqual([200, 200, 200], [future.result(timeout=3) for future in futures])
-                self.assertEqual(3, intelligence.call_count)
+                    results = [future.result(timeout=3) for future in futures]
+                self.assertEqual(5, intelligence.call_count)
+            self.assertEqual({200}, {status for status, _, _ in results})
+            self.assertEqual(
+                {"application/json; charset=utf-8"},
+                {content_type for _, content_type, _ in results},
+            )
+            self.assertEqual(1, len({sha256(item[2]).hexdigest() for item in results}))
             self.assertEqual(2, peak_handlers)
         finally:
             release_handlers.set()
