@@ -3,6 +3,7 @@ from http.client import HTTPConnection
 from hashlib import sha256
 import json
 from pathlib import Path
+import socket
 from tempfile import TemporaryDirectory
 from threading import Barrier, Event, Lock, Thread
 from time import monotonic, sleep
@@ -415,6 +416,129 @@ class DashboardHttpTests(TestCase):
         finally:
             release_handlers.set()
             server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_server_read_deadline_releases_idle_clients_and_shutdown(self) -> None:
+        state = DashboardState()
+        with (
+            patch.object(DashboardThreadingHTTPServer, "max_request_threads", 2),
+            patch.object(
+                DashboardThreadingHTTPServer,
+                "request_read_timeout_seconds",
+                0.2,
+            ),
+        ):
+            server = create_server(state, port=0)
+        waiting_for_slot = Event()
+        shutdown_done = Event()
+        original_process_request = server.process_request
+
+        def observed_process_request(request, client_address):
+            if server._request_slots._value == 0:
+                waiting_for_slot.set()
+            return original_process_request(request, client_address)
+
+        server.process_request = observed_process_request
+        thread = Thread(
+            target=server.serve_forever,
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
+        thread.start()
+        slow_header = socket.create_connection(
+            ("127.0.0.1", server.server_port),
+            timeout=1,
+        )
+        partial_body = socket.create_connection(
+            ("127.0.0.1", server.server_port),
+            timeout=1,
+        )
+        probe_result: dict[str, object] = {}
+        probe_done = Event()
+
+        def health_request() -> None:
+            connection = HTTPConnection(
+                "127.0.0.1",
+                server.server_port,
+                timeout=2,
+            )
+            try:
+                connection.request("GET", "/api/health")
+                response = connection.getresponse()
+                probe_result.update(
+                    status=response.status,
+                    content_type=response.getheader("Content-Type"),
+                    body=response.read(),
+                )
+            except Exception as error:
+                probe_result["error"] = error
+            finally:
+                connection.close()
+                probe_done.set()
+
+        def stop_server() -> None:
+            server.shutdown()
+            shutdown_done.set()
+
+        probe_thread = Thread(target=health_request, daemon=True)
+        shutdown_thread = Thread(target=stop_server, daemon=True)
+        try:
+            slow_header.sendall(
+                b"POST /api/v1/intelligence/path HTTP/1.1\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: 64\r\n"
+            )
+            partial_body.sendall(
+                b"POST /api/v1/intelligence/path HTTP/1.1\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: 64\r\n\r\n"
+                b"{"
+            )
+            slots_deadline = monotonic() + 1
+            while server._request_slots._value and monotonic() < slots_deadline:
+                sleep(0.005)
+            self.assertEqual(0, server._request_slots._value)
+
+            probe_thread.start()
+            self.assertTrue(waiting_for_slot.wait(1))
+            self.assertFalse(probe_done.wait(0.05))
+
+            shutdown_started = monotonic()
+            shutdown_thread.start()
+            self.assertFalse(shutdown_done.wait(0.05))
+            self.assertTrue(shutdown_done.wait(1))
+            self.assertLess(monotonic() - shutdown_started, 1)
+            self.assertTrue(probe_done.wait(1))
+            self.assertNotIn("error", probe_result)
+            self.assertEqual(200, probe_result["status"])
+            self.assertEqual(
+                "application/json; charset=utf-8",
+                probe_result["content_type"],
+            )
+
+            for client in (slow_header, partial_body):
+                client.settimeout(1)
+                self.assertEqual(b"", client.recv(1))
+            slots_deadline = monotonic() + 1
+            while server._request_slots._value != 2 and monotonic() < slots_deadline:
+                sleep(0.005)
+            self.assertEqual(2, server._request_slots._value)
+        finally:
+            for client in (slow_header, partial_body):
+                try:
+                    client.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                client.close()
+            if shutdown_thread.is_alive():
+                shutdown_done.wait(2)
+            elif not shutdown_done.is_set():
+                server.shutdown()
+            probe_thread.join(timeout=2)
+            shutdown_thread.join(timeout=2)
             server.server_close()
             thread.join(timeout=2)
 

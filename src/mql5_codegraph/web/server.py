@@ -26,10 +26,12 @@ class DashboardThreadingHTTPServer(ThreadingHTTPServer):
 
     request_queue_size = 64
     max_request_threads = 32
+    request_read_timeout_seconds = 2.0
     daemon_threads = True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.max_request_threads = type(self).max_request_threads
+        self.request_read_timeout_seconds = type(self).request_read_timeout_seconds
         self._request_slots = BoundedSemaphore(self.max_request_threads)
         super().__init__(*args, **kwargs)
 
@@ -58,6 +60,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         return
+
+    def handle_one_request(self) -> None:
+        self.connection.settimeout(self.server.request_read_timeout_seconds)
+        try:
+            super().handle_one_request()
+        finally:
+            self.connection.settimeout(None)
+
+    def _finish_request_read(self) -> None:
+        self.connection.settimeout(None)
 
     def end_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -101,6 +113,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._json(500, {"error": {"code": "internal_error", "message": "Unexpected server error"}})
 
     def do_GET(self) -> None:
+        self._finish_request_read()
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query, keep_blank_values=True)
         try:
@@ -145,7 +158,11 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             if length < 0 or length > MAX_BODY_BYTES:
                 raise ApiError(413, "body_too_large", "Request body exceeds 64 KiB")
             try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                raw_body = self.rfile.read(length)
+            finally:
+                self._finish_request_read()
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise ApiError(400, "invalid_json", "Request body must contain valid UTF-8 JSON") from error
             if parsed.path == "/api/analyze":
@@ -164,6 +181,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             if operation is None:
                 raise ApiError(404, "endpoint_not_found", "API endpoint was not found")
             self._json(200, self.api.intelligence(operation, payload))
+        except TimeoutError:
+            raise
         except Exception as error:
             self._dispatch_error(error)
 
