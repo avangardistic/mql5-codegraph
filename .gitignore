@@ -11,6 +11,7 @@ htmlcov/
 .mypy_cache/
 .env*
 *.log
+!tests/fixtures/compiler_logs/*.log
 *.tmp
 .DS_Store
 Thumbs.db
@@ -27,3 +28,6 @@ src/mql5_codegraph/web_static/
 output/
 *.codegraph.json
 *.graphml
+/reference-corpus/
+/reference-overlays/
+/local-references/

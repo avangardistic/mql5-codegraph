@@ -8,12 +8,27 @@ from pathlib import Path
 import sys
 from typing import Any, Sequence
 
+from .analysis_budget import AnalysisBudget, AnalysisBudgetExceeded
+from .compiler_evidence import (
+    CompilerEvidenceError,
+    correlate_compiler_log,
+    correlation_result,
+)
 from .exporters.graphml import export_graphml
 from .graph import CodeGraph
 from .indexer import analyze_repository
 from .intelligence import (
     IntelligenceError,
     IntelligenceKernel,
+)
+from .intelligence.models import GraphIdentity
+from .reference import (
+    BuildRequest,
+    GraphifyRequest,
+    ReferenceCorpus,
+    ReferenceError,
+    build_graphify_overlay,
+    build_reference_corpus,
 )
 
 
@@ -24,6 +39,16 @@ def _emit(value: Any, as_json: bool, human: str | None = None) -> None:
         print(human)
     else:
         print(value)
+
+
+def _emit_error(value: dict[str, object], as_json: bool) -> None:
+    if as_json:
+        print(
+            json.dumps({"error": value}, ensure_ascii=False, indent=2, sort_keys=True),
+            file=sys.stderr,
+        )
+    else:
+        print(f"error: {value['message']}", file=sys.stderr)
 
 
 def _matches(graph: CodeGraph, symbol: str) -> list[str]:
@@ -43,6 +68,7 @@ def _parser() -> argparse.ArgumentParser:
     analyze.add_argument("--output", "-o", required=True)
     analyze.add_argument("--include-root", action="append", default=[])
     analyze.add_argument("--exclude", action="append", default=[])
+    analyze.add_argument("--max-work", type=int)
     analyze.add_argument("--json", action="store_true")
 
     status = subcommands.add_parser("status", help="Show saved graph metadata")
@@ -138,28 +164,236 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--output", "-o", required=True)
     export.add_argument("--json", action="store_true")
 
+    compiler_evidence = subcommands.add_parser(
+        "compiler-evidence",
+        help="Correlate an operator-supplied MetaEditor log with a saved graph",
+    )
+    compiler_evidence.add_argument("graph")
+    compiler_evidence.add_argument("--entry", required=True)
+    compiler_evidence.add_argument("--log", required=True)
+    compiler_evidence.add_argument("--exclude", action="append", default=[])
+    compiler_evidence.add_argument("--json", action="store_true")
+
+    reference = subcommands.add_parser(
+        "reference",
+        help="Build and query a local page-aware reference corpus",
+    )
+    reference_operations = reference.add_subparsers(
+        dest="reference_operation",
+        required=True,
+    )
+    reference_build = reference_operations.add_parser(
+        "build",
+        help="Build an immutable corpus from local PDF files",
+    )
+    reference_build.add_argument("input_dir")
+    reference_build.add_argument("--output", "-o", required=True)
+    reference_build.add_argument("--sources")
+    reference_build.add_argument(
+        "--max-pdf-bytes",
+        type=int,
+        default=512 * 1024 * 1024,
+    )
+    reference_build.add_argument(
+        "--max-pages-per-source",
+        type=int,
+        default=20_000,
+    )
+    reference_build.add_argument(
+        "--max-pages-per-section",
+        type=int,
+        default=32,
+    )
+    reference_build.add_argument("--json", action="store_true")
+
+    reference_status = reference_operations.add_parser(
+        "status",
+        help="Validate and describe the current corpus snapshot",
+    )
+    reference_status.add_argument("corpus_root")
+    reference_status.add_argument("--json", action="store_true")
+
+    reference_search = reference_operations.add_parser(
+        "search",
+        help="Search cited reference evidence",
+    )
+    reference_search.add_argument("corpus_root")
+    reference_search.add_argument("query")
+    reference_search.add_argument("--limit", type=int, default=20)
+    reference_search.add_argument("--max-excerpt-chars", type=int, default=1_200)
+    reference_search.add_argument("--json", action="store_true")
+
+    reference_excerpt = reference_operations.add_parser(
+        "excerpt",
+        help="Read a bounded exact section excerpt",
+    )
+    reference_excerpt.add_argument("corpus_root")
+    reference_excerpt.add_argument("section_id")
+    reference_excerpt.add_argument("--start", type=int, default=0)
+    reference_excerpt.add_argument("--max-chars", type=int, default=1_200)
+    reference_excerpt.add_argument("--json", action="store_true")
+
+    reference_graphify = reference_operations.add_parser(
+        "graphify",
+        help="Build a separate non-normative Graphify semantic overlay",
+    )
+    reference_graphify.add_argument("corpus_root")
+    reference_graphify.add_argument("--output", "-o", required=True)
+    reference_graphify.add_argument("--graphify", required=True)
+    reference_graphify.add_argument(
+        "--backend",
+        choices=["gemini", "kimi", "claude", "openai", "deepseek", "ollama"],
+        required=True,
+    )
+    reference_graphify.add_argument(
+        "--processing-boundary",
+        choices=["local", "remote"],
+        required=True,
+    )
+    reference_graphify.add_argument("--model")
+    reference_graphify.add_argument("--allow-remote", action="store_true")
+    reference_graphify.add_argument("--timeout-seconds", type=int, default=3_600)
+    reference_graphify.add_argument("--max-concurrency", type=int, default=1)
+    reference_graphify.add_argument("--json", action="store_true")
+
     serve = subcommands.add_parser("serve", help="Start the local interactive dashboard")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--root", help="Repository to analyze when the dashboard starts")
     serve.add_argument("--graph", help="Load an existing canonical graph JSON")
     serve.add_argument("--include-root", action="append", default=[])
+    serve.add_argument("--max-work", type=int)
     serve.add_argument("--no-browser", action="store_true")
     return parser
 
 
 def run(arguments: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(arguments)
+    if args.command == "reference":
+        try:
+            if args.reference_operation == "build":
+                result = build_reference_corpus(
+                    BuildRequest(
+                        input_dir=Path(args.input_dir),
+                        output_dir=Path(args.output),
+                        sources_path=Path(args.sources) if args.sources else None,
+                        max_pdf_bytes=args.max_pdf_bytes,
+                        max_pages_per_source=args.max_pages_per_source,
+                        max_pages_per_section=args.max_pages_per_section,
+                    )
+                )
+                human = (
+                    f"Built reference corpus {result['corpus_fingerprint'][:12]}: "
+                    f"{result['counts']['documents']} documents, "
+                    f"{result['counts']['pages']} pages, "
+                    f"{result['counts']['sections']} sections"
+                )
+            elif args.reference_operation == "graphify":
+                may_leave_machine = args.processing_boundary == "remote"
+                print(
+                    "reference graphify: "
+                    f"processing_boundary={args.processing_boundary} "
+                    f"backend={args.backend} "
+                    f"corpus_content_may_leave_machine={str(may_leave_machine).lower()}",
+                    file=sys.stderr,
+                )
+                result = build_graphify_overlay(
+                    GraphifyRequest(
+                        corpus_root=Path(args.corpus_root),
+                        output_dir=Path(args.output),
+                        executable=args.graphify,
+                        backend=args.backend,
+                        processing_boundary=args.processing_boundary,
+                        model=args.model,
+                        allow_remote=args.allow_remote,
+                        timeout_seconds=args.timeout_seconds,
+                        max_concurrency=args.max_concurrency,
+                    )
+                )
+                human = (
+                    f"Built Graphify overlay {result['overlay_fingerprint'][:12]} "
+                    f"for corpus {result['corpus_fingerprint'][:12]} "
+                    f"({result['processing_boundary']})"
+                )
+            else:
+                corpus = ReferenceCorpus.open(args.corpus_root)
+                if args.reference_operation == "status":
+                    result = corpus.status()
+                    human = (
+                        f"Reference corpus {result['corpus_fingerprint'][:12]}: "
+                        f"{result['counts']['documents']} documents, "
+                        f"{result['counts']['pages']} pages, "
+                        f"{result['counts']['sections']} sections"
+                    )
+                elif args.reference_operation == "search":
+                    result = corpus.search(
+                        args.query,
+                        limit=args.limit,
+                        max_excerpt_chars=args.max_excerpt_chars,
+                    )
+                    human = "\n".join(
+                        f"{item['source']['title']} "
+                        f"p.{item['citation']['physical_page_start']}"
+                        f"–{item['citation']['physical_page_end']}: "
+                        f"{item['section']['title']}"
+                        for item in result["results"]
+                    ) or "No reference matches"
+                else:
+                    result = corpus.excerpt(
+                        args.section_id,
+                        start=args.start,
+                        max_chars=args.max_chars,
+                    )
+                    human = result["excerpt"]
+        except ReferenceError as error:
+            _emit_error(error.to_dict(), args.json)
+            return 1
+        _emit(result, args.json, human)
+        return 0
     if args.command == "serve":
+        try:
+            AnalysisBudget(args.max_work)
+        except ValueError as error:
+            _emit_error(
+                {
+                    "code": "invalid_parameter",
+                    "message": str(error),
+                    "field": "max_work",
+                },
+                False,
+            )
+            return 1
         from .web import serve_dashboard
 
         serve_dashboard(
             host=args.host, port=args.port, root=args.root, graph_path=args.graph,
-            include_roots=args.include_root, open_browser=not args.no_browser,
+            include_roots=args.include_root, max_work=args.max_work,
+            open_browser=not args.no_browser,
         )
         return 0
     if args.command == "analyze":
-        graph = analyze_repository(args.root, args.include_root, args.exclude)
+        try:
+            AnalysisBudget(args.max_work)
+        except ValueError as error:
+            _emit_error(
+                {
+                    "code": "invalid_parameter",
+                    "message": str(error),
+                    "field": "max_work",
+                },
+                args.json,
+            )
+            return 1
+        try:
+            graph = analyze_repository(
+                args.root,
+                args.include_root,
+                args.exclude,
+                max_work=args.max_work,
+            )
+        except AnalysisBudgetExceeded as error:
+            _emit_error(error.to_dict(), args.json)
+            return 1
         graph.save(args.output)
         summary = {
             "output": str(Path(args.output).resolve()),
@@ -171,6 +405,48 @@ def run(arguments: Sequence[str] | None = None) -> int:
         _emit(summary, args.json,
               f"Indexed {summary['files']} files: {summary['nodes']} nodes, "
               f"{summary['edges']} edges, {summary['diagnostics']} diagnostics -> {args.output}")
+        return 0
+
+    if args.command == "compiler-evidence":
+        try:
+            graph = CodeGraph.load(args.graph)
+            root = graph.metadata.get("root")
+            if not isinstance(root, str) or not root:
+                raise CompilerEvidenceError(
+                    "compiler_correlation_failed",
+                    "Graph is missing the project root required for compiler correlation",
+                )
+            report = correlate_compiler_log(
+                graph,
+                root,
+                args.log,
+                args.entry,
+                excluded=args.exclude,
+            )
+            result = correlation_result(
+                report,
+                GraphIdentity(
+                    graph.schema_version,
+                    graph.metadata.get("source_fingerprint"),
+                ),
+            )
+        except CompilerEvidenceError as error:
+            _emit_error({"code": error.code, "message": error.message}, args.json)
+            return 1
+        except (OSError, ValueError, json.JSONDecodeError):
+            _emit_error(
+                {
+                    "code": "compiler_correlation_failed",
+                    "message": "Compiler evidence correlation failed",
+                },
+                args.json,
+            )
+            return 1
+        _emit(
+            result,
+            args.json,
+            f"Compiler evidence is {report.evidence_state}: {report.outcome}",
+        )
         return 0
 
     if args.command == "intelligence":
@@ -281,3 +557,7 @@ def main() -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
