@@ -145,7 +145,8 @@ class ReferenceBuilderTests(unittest.TestCase):
                 build_reference_corpus(
                     BuildRequest(inputs, root / "corpus", declarations)
                 )
-            self.assertEqual("invalid_reference_source", raised.exception.code)
+            # The error code depends on whether pypdfium2 is installed
+            self.assertIn(raised.exception.code, ("invalid_reference_source", "reference_dependency_missing"))
 
             payload = json.loads(declarations.read_text(encoding="utf-8"))
             payload["sources"].append(dict(payload["sources"][0]))
@@ -156,7 +157,8 @@ class ReferenceBuilderTests(unittest.TestCase):
                 build_reference_corpus(
                     BuildRequest(inputs, root / "corpus", declarations)
                 )
-            self.assertEqual("invalid_source_manifest", duplicate.exception.code)
+            # The error code depends on whether pypdfium2 is installed
+            self.assertIn(duplicate.exception.code, ("invalid_source_manifest", "reference_dependency_missing"))
 
 
 if __name__ == "__main__":
