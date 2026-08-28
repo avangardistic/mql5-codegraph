@@ -1,33 +1,43 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
+```
+# Compiled and build artifacts
+*.mq5
+
+# Dependencies
+node_modules/
 .venv/
 venv/
+__pycache__/
+*.pyc
+
+# Build directories
 build/
 dist/
-.coverage
-htmlcov/
-.pytest_cache/
-.mypy_cache/
-.env*
+target/
+
+# Logs and temp files
 *.log
-!tests/fixtures/compiler_logs/*.log
 *.tmp
+*.swp
+
+# Environment files
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# OS specific
 .DS_Store
 Thumbs.db
-.idea/
-.vscode/
-graphify-out/
-.gitnexus/
-web/node_modules/
-web/dist/
-web/.wrangler/
-web/*.tsbuildinfo
-src/mql5_codegraph/web_static/
-.playwright-cli/
-output/
-*.codegraph.json
-*.graphml
-/reference-corpus/
-/reference-overlays/
-/local-references/
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+```
