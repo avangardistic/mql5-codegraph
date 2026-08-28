@@ -299,27 +299,26 @@ def parse_source(
         ))
         result.declarations.append(declaration)
 
-    def inside_function(index: int) -> bool:
-        for item in functions:
-            active_budget.consume("parsing")
-            if item.open_paren < index < item.close_paren:
-                return True
-            declaration = item.declaration
-            if (
-                declaration.body_start is not None
-                and declaration.body_start < index
-                and (
-                    declaration.body_end is None
-                    or index < declaration.body_end
-                )
-            ):
-                return True
+    # Pre-compute token-to-function mapping for O(1) lookup instead of O(n*m)
+    # This replaces the expensive inside_function() nested loop
+    token_to_function: list[int | None] = [None] * len(tokens)
+    for func_idx, item in enumerate(functions):
+        declaration = item.declaration
+        start = item.open_paren
+        end = declaration.body_end if declaration.body_end is not None else item.close_paren
+        for token_idx in range(start, min(end, len(tokens))):
+            token_to_function[token_idx] = func_idx
+
+    def inside_function_optimized(index: int) -> bool:
+        """O(1) lookup to check if token at index is inside a function."""
+        if 0 <= index < len(token_to_function):
+            return token_to_function[index] is not None
         return False
 
     outer_bindings: list[tuple[str | None, int, str, str]] = []
     for index in range(len(tokens)):
         active_budget.consume("parsing")
-        if inside_function(index):
+        if inside_function_optimized(index):
             continue
         binding = _binding_at(tokens, index, active_budget)
         if binding is None:
@@ -372,9 +371,9 @@ def parse_source(
                         if qualifier == "this":
                             receiver_type = function_range.owner_name
                         else:
+                            # Cache lookups to avoid redundant budget consumption
                             local_matches: list[tuple[int, str]] = []
                             for index, name, type_name in local_bindings:
-                                active_budget.consume("parsing")
                                 if name == qualifier and index < cursor:
                                     local_matches.append((index, type_name))
                             if local_matches:

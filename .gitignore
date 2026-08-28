@@ -1,25 +1,26 @@
 ```
 # Compiled and build artifacts
-*.mq5
+*.pyc
+__pycache__/
 
 # Dependencies
-node_modules/
 .venv/
 venv/
-__pycache__/
-*.pyc
-
-# Build directories
-build/
+node_modules/
+*.egg-info/
 dist/
-target/
+build/
+*.so
+*.dylib
+*.dll
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
+*.swo
 
-# Environment files
+# Environment
 .env
 .env.local
 *.env.*
@@ -27,17 +28,34 @@ target/
 # Editors
 .vscode/
 .idea/
+*.pyc
+*.pyo
+*.pyd
 
-# OS specific
-.DS_Store
-Thumbs.db
-
-# Coverage
+# Coverage reports
+.coverage
 coverage/
 htmlcov/
-.coverage
 
-# Testing
-.pytest_cache/
-.mypy_cache/
+# Python specific
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/info/lfs
+.DS_Store
+Thumbs.db
 ```
