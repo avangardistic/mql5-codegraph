@@ -1,0 +1,7 @@
+
+[mcp]
+mcp<2,>=1.28.1
+
+[reference]
+pypdf<7,>=6.10
+pypdfium2<6,>=5.7.1
