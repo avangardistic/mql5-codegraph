@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-DEFAULT_MAX_WORK = 3_000_000
-MAX_MAX_WORK = 50_000_000
+DEFAULT_MAX_WORK = 1_000_000
+MAX_MAX_WORK = 10_000_000
 
 
 @dataclass(frozen=True, slots=True)
